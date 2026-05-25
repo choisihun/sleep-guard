@@ -1,0 +1,39 @@
+{
+  "protectedBundleIds": [
+    "com.apple.finder",
+    "com.apple.dock",
+    "com.apple.systemuiserver",
+    "com.apple.controlcenter",
+    "com.apple.notificationcenterui",
+    "com.apple.Spotlight",
+    "com.apple.systemevents",
+    "com.apple.loginwindow",
+    "com.apple.WindowServer",
+    "com.apple.bluetoothd",
+    "com.apple.audio.coreaudiod"
+  ],
+  "protectedProcessNames": [
+    "Finder",
+    "Dock",
+    "ControlCenter",
+    "NotificationCenter",
+    "Spotlight",
+    "System Events",
+    "SystemUIServer",
+    "WindowServer",
+    "loginwindow",
+    "powerd",
+    "bluetoothd",
+    "coreaudiod",
+    "mDNSResponder",
+    "dasd",
+    "kernel_task",
+    "launchd",
+    "runningboardd",
+    "notifyd",
+    "configd",
+    "securityd",
+    "distnoted",
+    "cfprefsd"
+  ]
+}

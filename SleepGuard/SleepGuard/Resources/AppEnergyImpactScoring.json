@@ -1,0 +1,14 @@
+{
+  "highRiskScoreMinimum": 45,
+  "mediumRiskScoreMinimum": 18,
+  "cpuScoreMultiplier": 16,
+  "maximumCPUScore": 80,
+  "memoryMegabytesPerPoint": 120,
+  "maximumMemoryScore": 14,
+  "foregroundScore": 6,
+  "visibleScore": 2,
+  "maximumScore": 100,
+  "minimumIncludedScore": 0,
+  "cpuReasonMinimum": 1,
+  "memoryReasonMinimumMegabytes": 500
+}
