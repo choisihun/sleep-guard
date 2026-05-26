@@ -12,4 +12,8 @@ final class ReportsViewModel: ObservableObject {
     func refresh() async {
         await controller.reloadHistory()
     }
+
+    func reanalyze(reportId: UUID) async {
+        await controller.reanalyzeReport(id: reportId)
+    }
 }

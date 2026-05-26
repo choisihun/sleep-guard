@@ -107,7 +107,9 @@ struct DashboardView: View {
                                     Spacer()
                                     RiskBadgeView(level: report.riskLevel, score: report.riskScore)
                                 }
-                                Text("\(session.batteryBefore)% → \(session.batteryAfter ?? session.batteryBefore)% · DarkWake \(report.darkWakeCount)회")
+                                Text(report.eventAnalysisWarningText == nil
+                                     ? "\(session.batteryBefore)% → \(session.batteryAfter ?? session.batteryBefore)% · DarkWake \(report.darkWakeCount)회"
+                                     : "\(session.batteryBefore)% → \(session.batteryAfter ?? session.batteryBefore)% · pmset 이벤트 확인 불가")
                                     .foregroundStyle(.secondary)
                                 Text(report.summaryText)
                                     .lineLimit(4)

@@ -1,6 +1,6 @@
 import Foundation
 
-struct PMSetAssertionParser {
+nonisolated struct PMSetAssertionParser {
     private let knownAssertionTypes = [
         "PreventUserIdleSystemSleep",
         "PreventUserIdleDisplaySleep",

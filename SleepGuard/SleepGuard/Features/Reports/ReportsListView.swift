@@ -27,7 +27,7 @@ struct ReportsListView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        Text("DarkWake \(report.darkWakeCount) · Wake Request \(report.wakeRequestCount)")
+                        Text(report.eventAnalysisWarningText == nil ? "DarkWake \(report.darkWakeCount) · Wake Request \(report.wakeRequestCount)" : "pmset 이벤트 확인 불가")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -46,9 +46,23 @@ struct ReportsListView: View {
         } detail: {
             if let selectedReportId,
                let report = controller.recentReports.first(where: { $0.id == selectedReportId }) {
-                ReportDetailView(report: report, session: controller.recentSessions.first { $0.id == report.sessionId })
+                ReportDetailView(
+                    report: report,
+                    session: controller.recentSessions.first { $0.id == report.sessionId },
+                    isReanalyzing: controller.reanalyzingReportId == report.id,
+                    onReanalyze: {
+                        Task { await viewModel.reanalyze(reportId: report.id) }
+                    }
+                )
             } else if let report = controller.recentReports.first {
-                ReportDetailView(report: report, session: controller.recentSessions.first { $0.id == report.sessionId })
+                ReportDetailView(
+                    report: report,
+                    session: controller.recentSessions.first { $0.id == report.sessionId },
+                    isReanalyzing: controller.reanalyzingReportId == report.id,
+                    onReanalyze: {
+                        Task { await viewModel.reanalyze(reportId: report.id) }
+                    }
+                )
             } else {
                 EmptyStateView(title: "리포트 없음", message: "Mac이 깨어난 뒤 Sleep Guard가 분석한 결과가 여기에 쌓입니다.", systemImage: "doc.text")
             }

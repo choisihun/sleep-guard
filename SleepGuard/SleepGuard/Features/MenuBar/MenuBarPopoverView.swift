@@ -86,7 +86,7 @@ struct MenuBarPopoverView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("\(session.batteryBefore)% → \(session.batteryAfter ?? session.batteryBefore)%")
                             .font(.headline)
-                        Text("DarkWake \(report.darkWakeCount)회")
+                        Text(report.eventAnalysisWarningText == nil ? "DarkWake \(report.darkWakeCount)회" : "pmset 이벤트 확인 불가")
                         HStack {
                             Text("판정")
                             RiskBadgeView(level: report.riskLevel, score: report.riskScore)

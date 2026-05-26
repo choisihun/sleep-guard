@@ -3,6 +3,8 @@ import SwiftUI
 struct ReportDetailView: View {
     var report: SleepReport
     var session: SleepSession?
+    var isReanalyzing = false
+    var onReanalyze: () -> Void = {}
     @State private var showRawLog = false
 
     var body: some View {
@@ -16,6 +18,12 @@ struct ReportDetailView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    Button {
+                        onReanalyze()
+                    } label: {
+                        Label(isReanalyzing ? "분석 중" : "다시 분석", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(!canReanalyze || isReanalyzing)
                     RiskBadgeView(level: report.riskLevel, score: report.riskScore)
                 }
 
@@ -47,11 +55,34 @@ struct ReportDetailView: View {
                 }
 
                 SectionCard(title: "분석") {
-                    MetricRow(title: "DarkWake", value: "\(report.darkWakeCount)")
-                    MetricRow(title: "Wake Requests", value: "\(report.wakeRequestCount)")
-                    MetricRow(title: "Assertions", value: "\(report.assertionCount)")
-                    MetricRow(title: "Bluetooth Delay", value: "\(report.bluetoothDelayCount)")
-                    MetricRow(title: "TCP KeepAlive", value: "\(report.tcpKeepAliveCount)")
+                    if let eventAnalysisWarningText = report.eventAnalysisWarningText {
+                        Label(eventAnalysisWarningText, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.secondary)
+                    }
+                    MetricRow(title: "DarkWake", value: metricValue(report.darkWakeCount))
+                    MetricRow(title: "Wake Requests", value: metricValue(report.wakeRequestCount))
+                    MetricRow(title: "Assertions", value: metricValue(report.assertionCount))
+                    MetricRow(title: "Bluetooth Delay", value: metricValue(report.bluetoothDelayCount))
+                    MetricRow(title: "TCP KeepAlive", value: metricValue(report.tcpKeepAliveCount))
+                }
+
+                SectionCard(title: "pmset 수집 진단") {
+                    if let diagnostics = report.pmsetDiagnostics {
+                        MetricRow(title: "수집 시각", value: diagnostics.collectedAt?.formatted(date: .abbreviated, time: .standard) ?? "기록 없음")
+                        MetricRow(title: "재시도", value: "\(diagnostics.retryCount)회")
+                        MetricRow(title: "세션 이벤트 라인", value: "\(diagnostics.sessionEventLineCount)")
+                        MetricRow(title: "raw 로그 라인", value: "\(diagnostics.rawLogLineCount)")
+                        MetricRow(title: "분석 윈도우", value: analysisWindowText(diagnostics))
+                        if let error = diagnostics.errorDescription, !error.isEmpty {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    } else {
+                        Text("이 리포트에는 pmset 수집 진단값이 없습니다.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 SectionCard(title: "요약") {
@@ -78,7 +109,7 @@ struct ReportDetailView: View {
 
                 DisclosureGroup("raw pmset excerpt", isExpanded: $showRawLog) {
                     ScrollView(.horizontal) {
-                        Text(report.rawPMSetExcerpt.isEmpty ? "raw log excerpt disabled" : report.rawPMSetExcerpt)
+                        Text(rawLogText)
                             .font(.system(.caption, design: .monospaced))
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -94,6 +125,29 @@ struct ReportDetailView: View {
         let minutes = Int(seconds / 60)
         if minutes < 60 { return "\(minutes)분" }
         return "\(minutes / 60)시간 \(minutes % 60)분"
+    }
+
+    private func metricValue(_ count: Int) -> String {
+        report.eventAnalysisWarningText == nil ? "\(count)" : "확인 불가"
+    }
+
+    private var canReanalyze: Bool {
+        session?.wokeAt != nil
+    }
+
+    private var rawLogText: String {
+        if let eventAnalysisWarningText = report.eventAnalysisWarningText {
+            return eventAnalysisWarningText
+        }
+        return report.rawPMSetExcerpt.isEmpty ? "raw log excerpt disabled" : report.rawPMSetExcerpt
+    }
+
+    private func analysisWindowText(_ diagnostics: PMSetLogDiagnostics) -> String {
+        guard let start = diagnostics.analysisWindowStart,
+              let end = diagnostics.analysisWindowEnd else {
+            return "전체 로그"
+        }
+        return "\(start.formatted(date: .omitted, time: .standard)) ~ \(end.formatted(date: .omitted, time: .standard))"
     }
 }
 

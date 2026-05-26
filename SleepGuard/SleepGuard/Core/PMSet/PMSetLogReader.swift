@@ -1,11 +1,11 @@
 import Foundation
 
-protocol PMSetLogReading {
+nonisolated protocol PMSetLogReading {
     func rawLog() async throws -> String
     func rawAssertions() async throws -> String
 }
 
-struct PMSetLogReader: PMSetLogReading {
+nonisolated struct PMSetLogReader: PMSetLogReading {
     var commandRunner: PMSetCommandRunning
 
     init(commandRunner: PMSetCommandRunning = PMSetCommandRunner()) {

@@ -35,5 +35,6 @@
     "securityd",
     "distnoted",
     "cfprefsd"
-  ]
+  ],
+  "forceTerminationAllowedBundleIds": []
 }

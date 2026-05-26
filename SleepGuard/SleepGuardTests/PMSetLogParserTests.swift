@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import SleepGuard
 
@@ -16,6 +17,36 @@ struct PMSetLogParserTests {
         #expect(events.contains { $0.category == .assertion && $0.batteryCharge == 72 })
         #expect(events.contains { $0.category == .bluetooth })
         #expect(events.contains { $0.category == .sleepService })
+    }
+
+    @Test func filtersEventsToSleepSessionWindow() throws {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
+        let start = try #require(formatter.date(from: "2026-05-22 23:10:00 +0900"))
+        let end = try #require(formatter.date(from: "2026-05-22 23:18:30 +0900"))
+        let rawLog = """
+        2026-05-22 20:00:00 +0900 DarkWake              DarkWake from Normal Sleep [CDN] : due to old.event Using BATT (Charge:80%)
+        \(Self.sample)
+        2026-05-23 02:00:00 +0900 DarkWake              DarkWake from Normal Sleep [CDN] : due to future.event Using BATT (Charge:65%)
+        """
+
+        let events = PMSetLogParser().events(rawLog, around: start, end: end)
+
+        #expect(events.contains { $0.wakeReason == "EC.DarkPME/MaintenanceWake" })
+        #expect(!events.contains { $0.rawLine.contains("old.event") })
+        #expect(!events.contains { $0.rawLine.contains("future.event") })
+    }
+
+    @Test func doesNotTreatDarkwakeAssertionTextAsDarkWakeEvent() {
+        let rawLog = """
+        2026-05-26 05:29:10 +0900 Assertions           PID 445(powerd) Created InternalPreventSleep "Holding in darkwake for up to 20 seconds to query model for inactivity prediction" 00:00:00 id:0x0xd00009859 [System: SRPrevSleep kCPU]
+        """
+
+        let events = PMSetLogParser().parse(rawLog)
+
+        #expect(events.contains { $0.category == .assertion && $0.assertionType == "InternalPreventSleep" })
+        #expect(!events.contains { $0.category == .darkWake })
     }
 
     private static let sample = """

@@ -35,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { await controller?.handleDidWake() }
             }
             monitor.onScreensDidSleep = { [weak controller = container.controller] in
-                Task { await controller?.analyzeNow() }
+                Task { await controller?.handleScreensDidSleep() }
             }
             monitor.start()
             powerEventMonitor = monitor

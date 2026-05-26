@@ -12,6 +12,8 @@ struct SleepReportDraft {
     var tcpKeepAliveCount: Int
     var rawPMSetExcerpt: String
     var topSuspectNames: [String]
+    var eventAnalysisStatus: SleepEventAnalysisStatus
+    var pmsetDiagnostics: PMSetLogDiagnostics?
 }
 
 struct SleepReportGenerator {
@@ -24,18 +26,21 @@ struct SleepReportGenerator {
         rawPMSetExcerpt: String,
         runningApps: [RunningAppRecord],
         terminatedApps: [RunningAppRecord],
-        restoredApps: [RunningAppRecord]
+        restoredApps: [RunningAppRecord],
+        eventAnalysisStatus: SleepEventAnalysisStatus = .available,
+        pmsetDiagnostics: PMSetLogDiagnostics? = nil
     ) -> SleepReportDraft {
-        let darkWakeCount = events.filter { $0.category == .darkWake }.count
-        let wakeRequestEvents = events.filter { $0.category == .wakeRequest }
-        let wakeRequestCount = Set(wakeRequestEvents.map(\.rawLine)).count
-        let assertionEvents = events.filter { $0.category == .assertion }
-        let bluetoothDelayCount = events.filter {
+        let canAnalyzeEvents = !eventAnalysisStatus.isUnavailable
+        let darkWakeCount = canAnalyzeEvents ? events.filter { $0.category == .darkWake }.count : 0
+        let wakeRequestEvents = canAnalyzeEvents ? events.filter { $0.category == .wakeRequest } : []
+        let wakeRequestCount = canAnalyzeEvents ? Set(wakeRequestEvents.map(\.rawLine)).count : 0
+        let assertionEvents = canAnalyzeEvents ? events.filter { $0.category == .assertion } : []
+        let bluetoothDelayCount = canAnalyzeEvents ? events.filter {
             $0.category == .bluetooth ||
                 $0.rawLine.localizedCaseInsensitiveContains("bluetooth sleep is slow") ||
                 $0.rawLine.localizedCaseInsensitiveContains("bluetooth.sleep is slow")
-        }.count
-        let tcpKeepAliveCount = events.filter(\.isTCPKeepAliveActive).count
+        }.count : 0
+        let tcpKeepAliveCount = canAnalyzeEvents ? events.filter(\.isTCPKeepAliveActive).count : 0
 
         let wakeProcesses = rankedNames(wakeRequestEvents.compactMap(\.processName))
         let assertionProcesses = rankedNames(assertionEvents.compactMap(\.processName))
@@ -55,7 +60,7 @@ struct SleepReportGenerator {
             )
         )
 
-        let recommendations = recommendationEngine.recommendations(
+        var recommendations = recommendationEngine.recommendations(
             drainPerHour: session.drainPerHour,
             darkWakeCount: darkWakeCount,
             tcpKeepAliveCount: tcpKeepAliveCount,
@@ -63,6 +68,9 @@ struct SleepReportGenerator {
             assertionProcesses: assertionProcesses,
             runningProcessNames: runningNames
         )
+        if eventAnalysisStatus.isUnavailable {
+            recommendations.insert(eventAnalysisStatus.unavailableRecommendationText, at: 0)
+        }
 
         return SleepReportDraft(
             riskScore: risk.score,
@@ -74,7 +82,8 @@ struct SleepReportGenerator {
                 wakeRequestCount: wakeRequestCount,
                 terminatedCount: terminatedApps.count,
                 restoredCount: restoredApps.count,
-                topSuspects: topSuspects
+                topSuspects: topSuspects,
+                eventAnalysisStatus: eventAnalysisStatus
             ),
             recommendations: recommendations,
             darkWakeCount: darkWakeCount,
@@ -83,7 +92,9 @@ struct SleepReportGenerator {
             bluetoothDelayCount: bluetoothDelayCount,
             tcpKeepAliveCount: tcpKeepAliveCount,
             rawPMSetExcerpt: rawPMSetExcerpt,
-            topSuspectNames: topSuspects
+            topSuspectNames: topSuspects,
+            eventAnalysisStatus: eventAnalysisStatus,
+            pmsetDiagnostics: pmsetDiagnostics
         )
     }
 
@@ -94,7 +105,8 @@ struct SleepReportGenerator {
         wakeRequestCount: Int,
         terminatedCount: Int,
         restoredCount: Int,
-        topSuspects: [String]
+        topSuspects: [String],
+        eventAnalysisStatus: SleepEventAnalysisStatus
     ) -> String {
         let before = session.batteryBefore
         let after = session.batteryAfter ?? before
@@ -107,6 +119,9 @@ struct SleepReportGenerator {
         }
         if terminatedCount > 0 {
             parts.append("Sleep Guard가 \(terminatedCount)개 앱을 종료했고 \(restoredCount)개 앱을 복구했습니다.")
+        }
+        if eventAnalysisStatus.isUnavailable {
+            parts.append(eventAnalysisStatus.unavailableSummaryText)
         }
         if risk == .good {
             parts.append("현재 수면 상태는 안정적으로 보입니다.")

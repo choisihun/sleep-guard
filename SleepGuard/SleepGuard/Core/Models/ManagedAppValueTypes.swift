@@ -3,6 +3,7 @@ import Foundation
 enum ManagedAppCategory: String, Codable, CaseIterable, Identifiable {
     case development
     case browser
+    case document
     case communication
     case media
     case cloud
@@ -16,6 +17,7 @@ enum ManagedAppCategory: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .development: "Development"
         case .browser: "Browser"
+        case .document: "Document"
         case .communication: "Communication"
         case .media: "Media"
         case .cloud: "Cloud"

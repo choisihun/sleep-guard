@@ -21,7 +21,10 @@ final class UserNotificationService: NSObject, UserNotificationServicing, UNUser
         content.title = "Sleep Guard 리포트가 준비됐습니다"
         let before = session.batteryBefore
         let after = session.batteryAfter ?? before
-        content.body = "배터리 \(before)% → \(after)%, -\(max(0, before - after))%. DarkWake \(report.darkWakeCount)회 감지"
+        let eventSummary = report.eventAnalysisStatus.isUnavailable
+            ? "pmset 이벤트 분석 불가"
+            : "DarkWake \(report.darkWakeCount)회 감지"
+        content.body = "배터리 \(before)% → \(after)%, -\(max(0, before - after))%. \(eventSummary)"
         content.sound = .default
         content.userInfo = ["reportId": report.id.uuidString]
 

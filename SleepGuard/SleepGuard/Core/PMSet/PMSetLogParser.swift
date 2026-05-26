@@ -1,6 +1,6 @@
 import Foundation
 
-struct PMSetLogParser {
+nonisolated struct PMSetLogParser {
     var wakeRequestParser = PMSetWakeRequestParser()
     var assertionParser = PMSetAssertionParser()
 
@@ -18,16 +18,26 @@ struct PMSetLogParser {
             .sorted { $0.timestamp < $1.timestamp }
     }
 
-    func excerpt(_ rawLog: String, around start: Date?, end: Date?, maxLines: Int = 160) -> String {
+    func events(_ rawLog: String, around start: Date?, end: Date?, paddingSeconds: TimeInterval = 600) -> [PMSetEvent] {
         guard let start, let end else {
+            return parse(rawLog)
+        }
+        return parse(rawLog).filter {
+            $0.timestamp >= start.addingTimeInterval(-paddingSeconds) &&
+                $0.timestamp <= end.addingTimeInterval(paddingSeconds)
+        }
+    }
+
+    func excerpt(_ rawLog: String, around start: Date?, end: Date?, maxLines: Int = 160) -> String {
+        if start == nil || end == nil {
             return rawLog.split(separator: "\n").suffix(maxLines).joined(separator: "\n")
         }
-        let events = parse(rawLog).filter { $0.timestamp >= start.addingTimeInterval(-600) && $0.timestamp <= end.addingTimeInterval(600) }
+        let events = events(rawLog, around: start, end: end)
         let lines = events.map(\.rawLine)
         return Array(lines.prefix(maxLines)).joined(separator: "\n")
     }
 
-    private func parseLine(_ line: String) -> [PMSetEvent] {
+    func parseLine(_ line: String) -> [PMSetEvent] {
         let timestamp = parseTimestamp(from: line) ?? Date.distantPast
         let lower = line.lowercased()
         let batteryCharge = parseBatteryCharge(from: line)
@@ -40,7 +50,7 @@ struct PMSetLogParser {
 
         if lower.contains("entering sleep state") {
             category = .sleep
-        } else if lower.contains("darkwake") {
+        } else if isDarkWakeLine(line) {
             category = .darkWake
             wakeReason = parseWakeReason(from: line)
         } else if lower.contains("wake requests") || lower.contains("wake request") {
@@ -99,6 +109,19 @@ struct PMSetLogParser {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 25 else { return nil }
         return dateFormatter.date(from: String(trimmed.prefix(25)))
+    }
+
+    private func isDarkWakeLine(_ line: String) -> Bool {
+        if logEntryCategory(from: line)?.localizedCaseInsensitiveCompare("DarkWake") == .orderedSame {
+            return true
+        }
+        return line.localizedCaseInsensitiveContains("DarkWake from")
+    }
+
+    private func logEntryCategory(from line: String) -> String? {
+        let parts = line.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count >= 4 else { return nil }
+        return String(parts[3])
     }
 
     private func parseBatteryCharge(from line: String) -> Int? {

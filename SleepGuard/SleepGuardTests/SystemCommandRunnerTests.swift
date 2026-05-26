@@ -13,6 +13,26 @@ final class SystemCommandRunnerTests: XCTestCase {
         XCTAssertEqual(output.trimmingCharacters(in: .whitespacesAndNewlines), "hello")
     }
 
+    func testDrainsLargeStandardOutputAndErrorWhileProcessRuns() async throws {
+        let runner = SystemCommandRunner(timeoutSeconds: 5)
+        let script = """
+        i=0
+        while [ $i -lt 8000 ]; do
+          printf 'stdout-line-%05d abcdefghijklmnopqrstuvwxyz\\n' "$i"
+          printf 'stderr-line-%05d abcdefghijklmnopqrstuvwxyz\\n' "$i" 1>&2
+          i=$((i + 1))
+        done
+        """
+
+        let output = try await runner.run(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", script]
+        )
+
+        XCTAssertTrue(output.contains("stdout-line-00000"))
+        XCTAssertTrue(output.contains("stdout-line-07999"))
+    }
+
     func testTimesOutAndTerminatesProcess() async {
         let runner = SystemCommandRunner(timeoutSeconds: 0.1)
 

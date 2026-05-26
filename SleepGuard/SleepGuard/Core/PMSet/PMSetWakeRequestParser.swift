@@ -1,6 +1,6 @@
 import Foundation
 
-struct PMSetWakeRequest: Hashable {
+nonisolated struct PMSetWakeRequest: Hashable {
     var processName: String
     var requestName: String?
     var deltaSeconds: Int?
@@ -8,7 +8,7 @@ struct PMSetWakeRequest: Hashable {
     var info: String?
 }
 
-struct PMSetWakeRequestParser {
+nonisolated struct PMSetWakeRequestParser {
     func processNames(in line: String) -> [String] {
         let parsedNames = requests(in: line).map(\.processName)
         if !parsedNames.isEmpty {

@@ -1,6 +1,6 @@
 import Foundation
 
-enum PMSetEventCategory: String, Codable, CaseIterable, Identifiable {
+nonisolated enum PMSetEventCategory: String, Codable, CaseIterable, Identifiable {
     case sleep
     case wake
     case darkWake
@@ -32,7 +32,7 @@ enum PMSetEventCategory: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct PMSetEvent: Identifiable, Codable, Hashable {
+nonisolated struct PMSetEvent: Identifiable, Codable, Hashable {
     var id: UUID
     var timestamp: Date
     var category: PMSetEventCategory

@@ -1,6 +1,19 @@
 import Combine
 import Foundation
 
+enum SleepLifecycleState: String, Equatable {
+    case idle
+    case preparing
+    case sleeping
+    case waking
+}
+
+enum SleepLifecycleEvent {
+    case willSleep
+    case didWake
+    case screensDidSleep
+}
+
 @MainActor
 final class SleepGuardController: ObservableObject {
     @Published private(set) var batteryInfo: BatteryInfo = .unknown
@@ -15,6 +28,8 @@ final class SleepGuardController: ObservableObject {
     @Published private(set) var assertionSummary = "분석 전"
     @Published private(set) var lastActionMessage = ""
     @Published private(set) var isWorking = false
+    @Published private(set) var reanalyzingReportId: UUID?
+    @Published private(set) var lifecycleState: SleepLifecycleState = .idle
 
     private let batteryMonitor: BatteryMonitor
     private let runningAppProvider: RunningAppProvider
@@ -24,6 +39,7 @@ final class SleepGuardController: ObservableObject {
     private let appRestorer: AppRestoring
     private let pmsetRunner: PMSetCommandRunning
     private let logParser: PMSetLogParser
+    private let logCollector: PMSetLogCollecting
     private let reportGenerator: SleepReportGenerator
     private let drainCalculator: BatteryDrainCalculator
     private let sessionStore: SleepSessionStoring
@@ -36,6 +52,8 @@ final class SleepGuardController: ObservableObject {
     private var activeSession: SleepSession?
     private var lastTerminatedRecords: [RunningAppRecord] = []
     private let suspiciousAppDetector: SuspiciousAppDetector
+    private var lifecycleEventQueue: [SleepLifecycleEvent] = []
+    private var isProcessingLifecycleEvent = false
 
     init(
         batteryMonitor: BatteryMonitor,
@@ -46,6 +64,7 @@ final class SleepGuardController: ObservableObject {
         appRestorer: AppRestoring,
         pmsetRunner: PMSetCommandRunning,
         logParser: PMSetLogParser,
+        logCollector: PMSetLogCollecting? = nil,
         reportGenerator: SleepReportGenerator,
         drainCalculator: BatteryDrainCalculator,
         sessionStore: SleepSessionStoring,
@@ -64,6 +83,7 @@ final class SleepGuardController: ObservableObject {
         self.appRestorer = appRestorer
         self.pmsetRunner = pmsetRunner
         self.logParser = logParser
+        self.logCollector = logCollector ?? PMSetLogCollector(commandRunner: pmsetRunner)
         self.reportGenerator = reportGenerator
         self.drainCalculator = drainCalculator
         self.sessionStore = sessionStore
@@ -101,6 +121,10 @@ final class SleepGuardController: ObservableObject {
     }
 
     func analyzeNow() async {
+        guard lifecycleState == .idle else {
+            lastActionMessage = "전원 이벤트 처리 중이라 현재 분석을 건너뜁니다."
+            return
+        }
         guard !isWorking else { return }
         isWorking = true
         defer { isWorking = false }
@@ -134,10 +158,67 @@ final class SleepGuardController: ObservableObject {
     }
 
     func cleanAndSleep() async {
+        guard lifecycleState == .idle, !isWorking else { return }
+        lifecycleState = .preparing
         await prepareForSleep(wasManualSleep: true, shouldEnterSleep: true)
+        lifecycleState = .sleeping
     }
 
     func handleWillSleep() async {
+        await handlePowerEvent(.willSleep)
+    }
+
+    func handleDidWake() async {
+        await handlePowerEvent(.didWake)
+    }
+
+    func handleScreensDidSleep() async {
+        await handlePowerEvent(.screensDidSleep)
+    }
+
+    func handlePowerEvent(_ event: SleepLifecycleEvent) async {
+        lifecycleEventQueue.append(event)
+        guard !isProcessingLifecycleEvent else { return }
+
+        isProcessingLifecycleEvent = true
+        defer { isProcessingLifecycleEvent = false }
+
+        while !lifecycleEventQueue.isEmpty {
+            let nextEvent = lifecycleEventQueue.removeFirst()
+            await processLifecycleEvent(nextEvent)
+        }
+    }
+
+    private func processLifecycleEvent(_ event: SleepLifecycleEvent) async {
+        switch event {
+        case .willSleep:
+            guard lifecycleState == .idle else {
+                lastActionMessage = "이미 수면 전환 처리 중입니다."
+                return
+            }
+            lifecycleState = .preparing
+            await handleWillSleepCore()
+            lifecycleState = .sleeping
+
+        case .didWake:
+            guard lifecycleState != .waking else {
+                lastActionMessage = "이미 wake 처리 중입니다."
+                return
+            }
+            lifecycleState = .waking
+            await handleDidWakeCore()
+            lifecycleState = .idle
+
+        case .screensDidSleep:
+            guard lifecycleState == .idle else {
+                lastActionMessage = "시스템 수면 전환 처리 중이라 화면 sleep 분석을 건너뜁니다."
+                return
+            }
+            await analyzeNow()
+        }
+    }
+
+    private func handleWillSleepCore() async {
         let settings = (try? await settingsStore.fetchOrCreate()) ?? AppSettings()
         if settings.autoCleanOnWillSleep {
             await prepareForSleep(wasManualSleep: false, shouldEnterSleep: false)
@@ -146,7 +227,7 @@ final class SleepGuardController: ObservableObject {
         }
     }
 
-    func handleDidWake() async {
+    private func handleDidWakeCore() async {
         guard !isWorking else { return }
         isWorking = true
         defer { isWorking = false }
@@ -179,18 +260,23 @@ final class SleepGuardController: ObservableObject {
 
             let settings = try await settingsStore.fetchOrCreate()
             let restored = await restoreTerminatedApps(settings: settings)
-            let rawLog = (try? await pmsetRunner.log()) ?? ""
-            let excerpt = settings.includePMSetRawExcerpt ? logParser.excerpt(rawLog, around: session.sleepStartedAt, end: wokeAt) : ""
-            rawLogText = excerpt
-            parsedEvents = logParser.parse(excerpt.isEmpty ? rawLog : excerpt)
+            let pmsetLog = await logCollector.collect(
+                sessionStart: session.sleepStartedAt,
+                sessionEnd: wokeAt,
+                includeRawExcerpt: settings.includePMSetRawExcerpt
+            )
+            rawLogText = pmsetLog.status.isUnavailable ? pmsetLog.status.unavailableSummaryText : pmsetLog.rawExcerpt
+            parsedEvents = pmsetLog.events
 
             let draft = reportGenerator.generate(
                 session: session,
                 events: parsedEvents,
-                rawPMSetExcerpt: excerpt,
+                rawPMSetExcerpt: pmsetLog.rawExcerpt,
                 runningApps: runningApps.map(RunningAppRecord.init(app:)),
                 terminatedApps: lastTerminatedRecords,
-                restoredApps: restored
+                restoredApps: restored,
+                eventAnalysisStatus: pmsetLog.status,
+                pmsetDiagnostics: pmsetLog.diagnostics
             )
             let report = try await reportStore.save(draft: draft, sessionId: session.id)
             try await snapshotStore.save(
@@ -206,7 +292,9 @@ final class SleepGuardController: ObservableObject {
                 notificationService.showWakeReportNotification(report: report, session: session)
             }
             activeSession = nil
-            lastActionMessage = "수면 리포트를 생성했습니다."
+            lastActionMessage = pmsetLog.status.isUnavailable
+                ? "수면 리포트를 생성했지만 pmset 로그 분석은 실패했습니다."
+                : "수면 리포트를 생성했습니다."
         } catch {
             lastActionMessage = "wake 처리 실패: \(error.localizedDescription)"
         }
@@ -214,24 +302,92 @@ final class SleepGuardController: ObservableObject {
     }
 
     func loadPMSetLog() async {
+        guard lifecycleState == .idle else {
+            lastActionMessage = "전원 이벤트 처리 중이라 pmset 로그 로드를 건너뜁니다."
+            return
+        }
         guard !isWorking else { return }
         isWorking = true
         defer { isWorking = false }
-        do {
-            let raw = try await pmsetRunner.log()
-            rawLogText = raw
-            parsedEvents = logParser.parse(raw)
-            lastActionMessage = "pmset 로그를 불러왔습니다."
-        } catch {
-            rawLogText = error.localizedDescription
-            parsedEvents = []
-        }
+        let pmsetLog = await logCollector.collect(sessionStart: nil, sessionEnd: nil, includeRawExcerpt: true)
+        rawLogText = pmsetLog.rawExcerpt.isEmpty
+            ? (pmsetLog.rawLog.isEmpty ? pmsetLog.status.unavailableSummaryText : pmsetLog.rawLog)
+            : pmsetLog.rawExcerpt
+        parsedEvents = pmsetLog.events
+        lastActionMessage = pmsetLog.status.isUnavailable
+            ? "pmset 로그 최신 tail을 불러오지 못했습니다."
+            : "pmset 로그 최신 tail을 불러왔습니다."
     }
 
     func loadImportedLog(rawLog: String, events: [PMSetEvent], sourceName: String) {
         rawLogText = rawLog
         parsedEvents = events
         lastActionMessage = "\(sourceName) 로그를 불러왔습니다."
+    }
+
+    func reanalyzeReport(id reportId: UUID) async {
+        guard lifecycleState == .idle else {
+            lastActionMessage = "전원 이벤트 처리 중이라 리포트 재분석을 건너뜁니다."
+            return
+        }
+        guard !isWorking, reanalyzingReportId == nil else { return }
+        isWorking = true
+        reanalyzingReportId = reportId
+        defer {
+            isWorking = false
+            reanalyzingReportId = nil
+        }
+
+        do {
+            guard let report = try await reportStore.fetch(id: reportId) else {
+                lastActionMessage = "다시 분석할 리포트를 찾을 수 없습니다."
+                await reloadHistory()
+                return
+            }
+            guard let session = try await sessionStore.fetch(id: report.sessionId) else {
+                lastActionMessage = "리포트의 수면 세션을 찾을 수 없습니다."
+                await reloadHistory()
+                return
+            }
+            guard let wokeAt = session.wokeAt else {
+                lastActionMessage = "아직 종료되지 않은 수면 세션은 다시 분석할 수 없습니다."
+                await reloadHistory()
+                return
+            }
+
+            let settings = try await settingsStore.fetchOrCreate()
+            let pmsetLog = await logCollector.collect(
+                sessionStart: session.sleepStartedAt,
+                sessionEnd: wokeAt,
+                includeRawExcerpt: settings.includePMSetRawExcerpt
+            )
+            rawLogText = pmsetLog.status.isUnavailable ? pmsetLog.status.unavailableSummaryText : pmsetLog.rawExcerpt
+            parsedEvents = pmsetLog.events
+
+            guard !pmsetLog.status.isUnavailable else {
+                _ = try await reportStore.updatePMSetDiagnostics(reportId: reportId, diagnostics: pmsetLog.diagnostics)
+                lastActionMessage = "리포트 재분석 실패: 기존 수치는 유지하고 pmset 수집 진단만 갱신했습니다."
+                await reloadHistory()
+                return
+            }
+
+            let snapshot = await snapshotRecords(sessionId: session.id)
+            let draft = reportGenerator.generate(
+                session: session,
+                events: pmsetLog.events,
+                rawPMSetExcerpt: pmsetLog.rawExcerpt,
+                runningApps: snapshot.running,
+                terminatedApps: snapshot.terminated,
+                restoredApps: snapshot.restored,
+                eventAnalysisStatus: pmsetLog.status,
+                pmsetDiagnostics: pmsetLog.diagnostics
+            )
+            _ = try await reportStore.update(reportId: reportId, draft: draft)
+            lastActionMessage = "리포트를 다시 분석했습니다."
+        } catch {
+            lastActionMessage = "리포트 재분석 실패: \(error.localizedDescription)"
+        }
+        await reloadHistory()
     }
 
     func reloadHistory() async {
@@ -367,6 +523,21 @@ final class SleepGuardController: ObservableObject {
             restored.append(updated)
         }
         return restored
+    }
+
+    private func snapshotRecords(sessionId: UUID) async -> (
+        running: [RunningAppRecord],
+        terminated: [RunningAppRecord],
+        restored: [RunningAppRecord]
+    ) {
+        guard let snapshot = try? await snapshotStore.latest(sessionId: sessionId) else {
+            return ([], [], [])
+        }
+        return (
+            StoreJSON.decode([RunningAppRecord].self, from: snapshot.runningAppsJSON) ?? [],
+            StoreJSON.decode([RunningAppRecord].self, from: snapshot.terminatedAppsJSON) ?? [],
+            StoreJSON.decode([RunningAppRecord].self, from: snapshot.restoredAppsJSON) ?? []
+        )
     }
 }
 

@@ -1,10 +1,16 @@
 import Foundation
 
-protocol CommandRunning {
+nonisolated protocol CommandRunning {
     func run(executableURL: URL, arguments: [String]) async throws -> String
+    func run(
+        executableURL: URL,
+        arguments: [String],
+        collectedOutputLimit: Int?,
+        stdoutHandler: (@Sendable (Data) -> Void)?
+    ) async throws -> String
 }
 
-enum CommandError: Error, LocalizedError, Equatable {
+nonisolated enum CommandError: Error, LocalizedError, Equatable {
     case executableNotFound(URL)
     case nonZeroExitCode(Int32, String)
     case timedOut
@@ -19,5 +25,23 @@ enum CommandError: Error, LocalizedError, Equatable {
         case .emptyOutput: "Command returned empty output"
         case .unknown(let message): message
         }
+    }
+}
+
+extension CommandRunning {
+    func run(
+        executableURL: URL,
+        arguments: [String],
+        collectedOutputLimit: Int?,
+        stdoutHandler: (@Sendable (Data) -> Void)?
+    ) async throws -> String {
+        let output = try await run(executableURL: executableURL, arguments: arguments)
+        if let data = output.data(using: .utf8) {
+            stdoutHandler?(data)
+            guard let collectedOutputLimit else { return output }
+            guard collectedOutputLimit > 0 else { return "" }
+            return String(data: data.suffix(collectedOutputLimit), encoding: .utf8) ?? ""
+        }
+        return output
     }
 }

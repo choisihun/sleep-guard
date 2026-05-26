@@ -28,7 +28,9 @@ struct SystemAppTerminator: AppTerminating {
             }
         }
 
-        let mayForce = mode == .forceIfAllowed && globalForceEnabled && configuration.allowsForceTerminate
+        let mayForce = mode == .forceIfAllowed &&
+            globalForceEnabled &&
+            policy.canForceTerminate(app, managedConfiguration: configuration)
         guard mayForce else { return .timedOut }
 
         if runningApplication.forceTerminate() {

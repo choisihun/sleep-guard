@@ -9,6 +9,7 @@ final class SettingsViewModel: ObservableObject {
 
     private let settingsStore: SettingsStoring
     private let loginItemManager: LoginItemManaging
+    private var persistedSnapshot: SettingsSnapshot?
 
     init(settingsStore: SettingsStoring, loginItemManager: LoginItemManaging) {
         self.settingsStore = settingsStore
@@ -18,6 +19,9 @@ final class SettingsViewModel: ObservableObject {
     func load() async {
         do {
             settings = try await settingsStore.fetchOrCreate()
+            if let settings {
+                persistedSnapshot = SettingsSnapshot(settings)
+            }
         } catch {
             message = error.localizedDescription
         }
@@ -25,11 +29,20 @@ final class SettingsViewModel: ObservableObject {
 
     func save() async {
         guard let settings else { return }
+        let previousSnapshot = persistedSnapshot ?? SettingsSnapshot(settings)
+        let requestedSnapshot = SettingsSnapshot(settings)
         do {
+            if requestedSnapshot.launchAtLogin != previousSnapshot.launchAtLogin {
+                try syncLoginItem(requestedSnapshot.launchAtLogin)
+            }
             try await settingsStore.save(settings)
-            try syncLoginItem(settings.launchAtLogin)
+            persistedSnapshot = requestedSnapshot
             message = "설정을 저장했습니다."
         } catch {
+            if requestedSnapshot.launchAtLogin != previousSnapshot.launchAtLogin {
+                try? syncLoginItem(previousSnapshot.launchAtLogin)
+            }
+            previousSnapshot.apply(to: settings)
             message = error.localizedDescription
         }
     }
@@ -40,5 +53,41 @@ final class SettingsViewModel: ObservableObject {
         } else {
             try loginItemManager.disable()
         }
+    }
+}
+
+private struct SettingsSnapshot {
+    var launchAtLogin: Bool
+    var autoCleanOnWillSleep: Bool
+    var showWakeReportNotification: Bool
+    var enableForceTerminate: Bool
+    var defaultTerminationTimeoutSeconds: Double
+    var maxAppsToQuitBeforeSleep: Int?
+    var restoreAppsOnWake: Bool
+    var includePMSetRawExcerpt: Bool
+    var showDockIcon: Bool
+
+    init(_ settings: AppSettings) {
+        launchAtLogin = settings.launchAtLogin
+        autoCleanOnWillSleep = settings.autoCleanOnWillSleep
+        showWakeReportNotification = settings.showWakeReportNotification
+        enableForceTerminate = settings.enableForceTerminate
+        defaultTerminationTimeoutSeconds = settings.defaultTerminationTimeoutSeconds
+        maxAppsToQuitBeforeSleep = settings.maxAppsToQuitBeforeSleep
+        restoreAppsOnWake = settings.restoreAppsOnWake
+        includePMSetRawExcerpt = settings.includePMSetRawExcerpt
+        showDockIcon = settings.showDockIcon
+    }
+
+    func apply(to settings: AppSettings) {
+        settings.launchAtLogin = launchAtLogin
+        settings.autoCleanOnWillSleep = autoCleanOnWillSleep
+        settings.showWakeReportNotification = showWakeReportNotification
+        settings.enableForceTerminate = enableForceTerminate
+        settings.defaultTerminationTimeoutSeconds = defaultTerminationTimeoutSeconds
+        settings.maxAppsToQuitBeforeSleep = maxAppsToQuitBeforeSleep
+        settings.restoreAppsOnWake = restoreAppsOnWake
+        settings.includePMSetRawExcerpt = includePMSetRawExcerpt
+        settings.showDockIcon = showDockIcon
     }
 }

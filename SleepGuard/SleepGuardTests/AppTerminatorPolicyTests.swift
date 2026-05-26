@@ -47,5 +47,44 @@ final class AppTerminatorPolicyTests: XCTestCase {
         XCTAssertTrue(policy.isProtected(finder))
         XCTAssertFalse(policy.canTerminate(finder, managedConfiguration: nil))
         XCTAssertTrue(policy.canTerminate(chrome, managedConfiguration: config))
+        XCTAssertFalse(policy.canForceTerminate(chrome, managedConfiguration: config))
+    }
+
+    func testForceTerminationRequiresPolicyAllowlistAndSafeCategory() {
+        let policy = ProtectedAppPolicy(
+            configuration: AppProtectionConfiguration(
+                protectedBundleIds: [],
+                protectedProcessNames: [],
+                forceTerminationAllowedBundleIds: ["com.example.Utility"]
+            )
+        )
+        let utility = RunningAppInfo(
+            bundleId: "com.example.Utility",
+            displayName: "Utility",
+            executableURL: nil,
+            bundleURL: nil,
+            processIdentifier: 300,
+            activationPolicyRawValue: NSApplication.ActivationPolicy.regular.rawValue,
+            isTerminated: false,
+            isHidden: false
+        )
+        var config = ManagedAppConfiguration(
+            id: UUID(),
+            bundleId: "com.example.Utility",
+            displayName: "Utility",
+            appURLString: nil,
+            isEnabled: true,
+            shouldQuitBeforeSleep: true,
+            shouldRestoreAfterWake: true,
+            allowsForceTerminate: true,
+            terminationTimeoutSeconds: 5,
+            category: .utility,
+            riskLevel: .medium
+        )
+
+        XCTAssertTrue(policy.canForceTerminate(utility, managedConfiguration: config))
+
+        config.category = .browser
+        XCTAssertFalse(policy.canForceTerminate(utility, managedConfiguration: config))
     }
 }
