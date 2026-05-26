@@ -79,7 +79,7 @@ struct DashboardView: View {
                 HStack(alignment: .top, spacing: 14) {
                     SectionCard(title: "현재 실행 중인 위험 앱") {
                         if controller.suspiciousApps.isEmpty {
-                            Text("관리 대상 중 현재 종료 대상 앱이 없습니다.")
+                            Text("배터리 영향이 높거나 관리 대상인 실행 앱이 없습니다.")
                                 .foregroundStyle(.secondary)
                         } else {
                             ForEach(controller.suspiciousApps) { app in

@@ -62,12 +62,8 @@ struct SystemAppEnergyImpactProvider: AppEnergyImpactProviding {
     func impacts(for apps: [RunningAppInfo]) async -> [AppEnergyImpact] {
         let snapshots = (try? await processSnapshots()) ?? [:]
         return apps.compactMap { app in
-            guard app.bundleId != nil else { return nil }
-            let snapshot = snapshots[app.processIdentifier] ?? ProcessResourceSnapshot(
-                pid: app.processIdentifier,
-                cpuPercent: 0,
-                residentMemoryKB: 0
-            )
+            guard app.bundleId != nil, !isCurrentApplication(app) else { return nil }
+            let snapshot = aggregatedSnapshot(for: app, snapshots: snapshots)
             let memoryMB = Double(snapshot.residentMemoryKB) / 1024
             let score = estimatedScore(app: app, snapshot: snapshot)
             guard score > scoring.minimumIncludedScore else { return nil }
@@ -92,9 +88,29 @@ struct SystemAppEnergyImpactProvider: AppEnergyImpactProviding {
     private func processSnapshots() async throws -> [pid_t: ProcessResourceSnapshot] {
         let output = try await runner.run(
             executableURL: psURL,
-            arguments: ["-axo", "pid=,pcpu=,rss="]
+            arguments: ["-axo", "pid=,ppid=,pcpu=,rss="]
         )
         return ProcessResourceSnapshot.parse(psOutput: output)
+    }
+
+    private func aggregatedSnapshot(
+        for app: RunningAppInfo,
+        snapshots: [pid_t: ProcessResourceSnapshot]
+    ) -> ProcessResourceSnapshot {
+        var cpuPercent = 0.0
+        var residentMemoryKB = 0
+
+        for snapshot in snapshots.values where snapshot.belongsToAppProcess(app.processIdentifier, snapshots: snapshots) {
+            cpuPercent += snapshot.cpuPercent
+            residentMemoryKB += snapshot.residentMemoryKB
+        }
+
+        return ProcessResourceSnapshot(
+            pid: app.processIdentifier,
+            parentProcessId: snapshots[app.processIdentifier]?.parentProcessId,
+            cpuPercent: cpuPercent,
+            residentMemoryKB: residentMemoryKB
+        )
     }
 
     private func estimatedScore(
@@ -116,20 +132,31 @@ struct SystemAppEnergyImpactProvider: AppEnergyImpactProviding {
     ) -> [String] {
         var reasons: [String] = []
         if snapshot.cpuPercent >= scoring.cpuReasonMinimum {
-            reasons.append(String(format: "CPU %.1f%%", snapshot.cpuPercent))
+            reasons.append("CPU 높음")
         }
         if memoryMB >= scoring.memoryReasonMinimumMegabytes {
-            reasons.append(String(format: "메모리 %.0f MB", memoryMB))
+            reasons.append("메모리 사용 큼")
         }
         if app.activationPolicy == .regular {
             reasons.append("실행 중인 앱")
         }
         return reasons
     }
+
+    private func isCurrentApplication(_ app: RunningAppInfo) -> Bool {
+        if app.processIdentifier == ProcessInfo.processInfo.processIdentifier {
+            return true
+        }
+        if let bundleId = app.bundleId, bundleId == Bundle.main.bundleIdentifier {
+            return true
+        }
+        return false
+    }
 }
 
 struct ProcessResourceSnapshot: Hashable {
     var pid: pid_t
+    var parentProcessId: pid_t?
     var cpuPercent: Double
     var residentMemoryKB: Int
 
@@ -139,16 +166,45 @@ struct ProcessResourceSnapshot: Hashable {
             .reduce(into: [pid_t: ProcessResourceSnapshot]()) { result, line in
                 let fields = line.split(whereSeparator: \.isWhitespace)
                 guard fields.count >= 3,
-                      let pid = pid_t(String(fields[0])),
-                      let cpuPercent = Double(fields[1]),
-                      let residentMemoryKB = Int(fields[2]) else {
+                      let pid = pid_t(String(fields[0])) else {
                     return
                 }
+                let parsed: (parentProcessId: pid_t?, cpuPercent: Double, residentMemoryKB: Int)?
+                if fields.count >= 4,
+                   let parentProcessId = pid_t(String(fields[1])),
+                   let cpuPercent = Double(fields[2]),
+                   let residentMemoryKB = Int(fields[3]) {
+                    parsed = (parentProcessId, cpuPercent, residentMemoryKB)
+                } else if let cpuPercent = Double(fields[1]),
+                          let residentMemoryKB = Int(fields[2]) {
+                    parsed = (nil, cpuPercent, residentMemoryKB)
+                } else {
+                    parsed = nil
+                }
+                guard let parsed else { return }
                 result[pid] = ProcessResourceSnapshot(
                     pid: pid,
-                    cpuPercent: cpuPercent,
-                    residentMemoryKB: residentMemoryKB
+                    parentProcessId: parsed.parentProcessId,
+                    cpuPercent: parsed.cpuPercent,
+                    residentMemoryKB: parsed.residentMemoryKB
                 )
             }
+    }
+
+    func belongsToAppProcess(_ appProcessId: pid_t, snapshots: [pid_t: ProcessResourceSnapshot]) -> Bool {
+        if pid == appProcessId {
+            return true
+        }
+
+        var seen = Set<pid_t>()
+        var parent = parentProcessId
+        while let currentParent = parent, !seen.contains(currentParent) {
+            if currentParent == appProcessId {
+                return true
+            }
+            seen.insert(currentParent)
+            parent = snapshots[currentParent]?.parentProcessId
+        }
+        return false
     }
 }

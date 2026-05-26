@@ -100,24 +100,34 @@ final class SleepGuardController: ObservableObject {
         await reloadHistory()
     }
 
-    func refreshCurrentState() async {
+    func refreshCurrentState(updateRisk: Bool = true) async {
         batteryInfo = batteryMonitor.currentBatteryInfo() ?? .unknown
         runningApps = runningAppProvider.runningApplications()
         let managed = (try? await managedAppStore.fetchAll()) ?? []
         appEnergyImpacts = await energyImpactProvider.impacts(for: runningApps)
-        suspiciousApps = suspiciousAppDetector.suspiciousApps(runningApps: runningApps, managedApps: managed)
-        currentRisk = SleepRiskAnalyzer().analyze(
-            SleepRiskInput(
-                drainPercent: 0,
-                drainPerHour: 0,
-                darkWakeCount: 0,
-                wakeRequestCount: 0,
-                assertionCount: 0,
-                bluetoothDelayCount: 0,
-                tcpKeepAliveCount: 0,
-                suspiciousProcessNames: suspiciousApps.map(\.displayName)
-            )
+        suspiciousApps = suspiciousAppDetector.suspiciousApps(
+            runningApps: runningApps,
+            managedApps: managed,
+            energyImpacts: appEnergyImpacts
         )
+        if updateRisk {
+            currentRisk = SleepRiskAnalyzer().analyze(
+                SleepRiskInput(
+                    drainPercent: 0,
+                    drainPerHour: 0,
+                    darkWakeCount: 0,
+                    wakeRequestCount: 0,
+                    assertionCount: 0,
+                    bluetoothDelayCount: 0,
+                    tcpKeepAliveCount: 0,
+                    suspiciousProcessNames: suspiciousApps.map(\.displayName)
+                )
+            )
+        }
+    }
+
+    func canShowInManagedAppRecommendations(_ app: RunningAppInfo) -> Bool {
+        !policy.isProtected(app)
     }
 
     func analyzeNow() async {
@@ -129,7 +139,7 @@ final class SleepGuardController: ObservableObject {
         isWorking = true
         defer { isWorking = false }
 
-        await refreshCurrentState()
+        await refreshCurrentState(updateRisk: false)
         do {
             let assertions = try await pmsetRunner.assertions()
             rawLogText = assertions
@@ -219,7 +229,10 @@ final class SleepGuardController: ObservableObject {
     }
 
     private func handleWillSleepCore() async {
-        let settings = (try? await settingsStore.fetchOrCreate()) ?? AppSettings()
+        guard let settings = try? await settingsStore.fetchOrCreate() else {
+            await captureSleepStartOnly(wasManualSleep: false)
+            return
+        }
         if settings.autoCleanOnWillSleep {
             await prepareForSleep(wasManualSleep: false, shouldEnterSleep: false)
         } else {
@@ -428,39 +441,26 @@ final class SleepGuardController: ObservableObject {
             runningApps = running
             let impacts = await energyImpactProvider.impacts(for: running)
             appEnergyImpacts = impacts
-            let scoreByProcessId = Dictionary(
-                impacts.map { ($0.app.processIdentifier, $0.score) },
-                uniquingKeysWith: { first, _ in first }
-            )
 
             let session = try await sessionStore.create(startedAt: Date(), batteryBefore: battery.percent, wasManualSleep: wasManualSleep)
             activeSession = session
 
             let managed = try await managedAppStore.fetchAll()
-            let configByBundleId = Dictionary(
-                managed.map { ($0.bundleId, $0.configuration) },
-                uniquingKeysWith: { first, _ in first }
+            let candidates = terminationCandidates(
+                runningApps: running,
+                energyImpacts: impacts,
+                managedApps: managed,
+                settings: settings
             )
-            let candidates = running.filter { app in
-                guard let bundleId = app.bundleId else { return false }
-                return policy.canTerminate(app, managedConfiguration: configByBundleId[bundleId])
-            }
-            let sortedCandidates = candidates.sorted { lhs, rhs in
-                let lhsScore = scoreByProcessId[lhs.processIdentifier] ?? 0
-                let rhsScore = scoreByProcessId[rhs.processIdentifier] ?? 0
-                if lhsScore == rhsScore {
-                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
-                }
-                return lhsScore > rhsScore
-            }
-            let boundedCandidates = Array(sortedCandidates.prefix(settings.effectiveMaxAppsToQuitBeforeSleep))
+            let boundedCandidates = Array(candidates.prefix(settings.effectiveMaxAppsToQuitBeforeSleep))
 
             var terminated: [RunningAppRecord] = []
-            for app in boundedCandidates {
-                guard let bundleId = app.bundleId else { continue }
+            var autoTerminatedCount = 0
+            for candidate in boundedCandidates {
+                let app = candidate.app
                 let result = await appTerminator.terminate(
                     app: app,
-                    configuration: configByBundleId[bundleId],
+                    configuration: candidate.configuration,
                     globalForceEnabled: settings.enableForceTerminate,
                     mode: .forceIfAllowed
                 )
@@ -468,6 +468,9 @@ final class SleepGuardController: ObservableObject {
                 record.wasTerminatedBySleepGuard = result.isTerminated
                 record.terminationResultRawValue = result.rawValue
                 if result.isTerminated {
+                    if candidate.isAutomaticHighImpact {
+                        autoTerminatedCount += 1
+                    }
                     terminated.append(record)
                 }
             }
@@ -487,12 +490,24 @@ final class SleepGuardController: ObservableObject {
             if shouldEnterSleep {
                 do {
                     try await pmsetRunner.sleepNow()
-                    lastActionMessage = "\(terminated.count)개 앱을 정리하고 sleepnow를 요청했습니다."
+                    lastActionMessage = sleepActionMessage(
+                        terminatedCount: terminated.count,
+                        autoTerminatedCount: autoTerminatedCount,
+                        suffix: "sleepnow를 요청했습니다."
+                    )
                 } catch {
-                    lastActionMessage = "\(terminated.count)개 앱은 정리했지만 sleep 진입 실패: \(error.localizedDescription)"
+                    lastActionMessage = sleepActionMessage(
+                        terminatedCount: terminated.count,
+                        autoTerminatedCount: autoTerminatedCount,
+                        suffix: "sleep 진입 실패: \(error.localizedDescription)"
+                    )
                 }
             } else {
-                lastActionMessage = "willSleep 정리 완료: \(terminated.count)개 앱 종료 요청"
+                lastActionMessage = sleepActionMessage(
+                    terminatedCount: terminated.count,
+                    autoTerminatedCount: autoTerminatedCount,
+                    suffix: "willSleep 정리 완료"
+                )
             }
         } catch {
             lastActionMessage = "정리 실패: \(error.localizedDescription)"
@@ -516,7 +531,7 @@ final class SleepGuardController: ObservableObject {
         )
         var restored: [RunningAppRecord] = []
         for record in lastTerminatedRecords {
-            let shouldRestore = record.bundleId.flatMap { restoreMap[$0] } ?? false
+            let shouldRestore = record.bundleId.flatMap { restoreMap[$0] } ?? true
             let result = await appRestorer.restore(record: record, shouldRestore: shouldRestore)
             var updated = record
             updated.wasRestoredBySleepGuard = result == .success
@@ -538,6 +553,104 @@ final class SleepGuardController: ObservableObject {
             StoreJSON.decode([RunningAppRecord].self, from: snapshot.terminatedAppsJSON) ?? [],
             StoreJSON.decode([RunningAppRecord].self, from: snapshot.restoredAppsJSON) ?? []
         )
+    }
+}
+
+private struct TerminationCandidate {
+    var app: RunningAppInfo
+    var configuration: ManagedAppConfiguration
+    var score: Double
+    var isAutomaticHighImpact: Bool
+}
+
+private extension SleepGuardController {
+    func terminationCandidates(
+        runningApps: [RunningAppInfo],
+        energyImpacts: [AppEnergyImpact],
+        managedApps: [ManagedApp],
+        settings: AppSettings
+    ) -> [TerminationCandidate] {
+        let scoreByProcessId = Dictionary(
+            energyImpacts.map { ($0.app.processIdentifier, $0.score) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let managedBundleIds = Set(managedApps.map(\.bundleId))
+        let configByBundleId = Dictionary(
+            managedApps.map { ($0.bundleId, $0.configuration) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var candidates: [TerminationCandidate] = []
+
+        for app in runningApps {
+            guard let bundleId = app.bundleId,
+                  let configuration = configByBundleId[bundleId],
+                  policy.canTerminate(app, managedConfiguration: configuration) else {
+                continue
+            }
+            candidates.append(
+                TerminationCandidate(
+                    app: app,
+                    configuration: configuration,
+                    score: scoreByProcessId[app.processIdentifier] ?? 0,
+                    isAutomaticHighImpact: false
+                )
+            )
+        }
+
+        if settings.shouldAutoQuitHighImpactAppsBeforeSleep {
+            for impact in energyImpacts where impact.level == .high {
+                let app = impact.app
+                guard let bundleId = app.bundleId,
+                      !managedBundleIds.contains(bundleId),
+                      policy.canAutoTerminateHighImpactApp(app) else {
+                    continue
+                }
+                candidates.append(
+                    TerminationCandidate(
+                        app: app,
+                        configuration: automaticHighImpactConfiguration(
+                            app: app,
+                            impact: impact,
+                            timeout: settings.defaultTerminationTimeoutSeconds
+                        ),
+                        score: impact.score,
+                        isAutomaticHighImpact: true
+                    )
+                )
+            }
+        }
+
+        return candidates.sorted { lhs, rhs in
+            if lhs.score == rhs.score {
+                return lhs.app.displayName.localizedCaseInsensitiveCompare(rhs.app.displayName) == .orderedAscending
+            }
+            return lhs.score > rhs.score
+        }
+    }
+
+    func automaticHighImpactConfiguration(
+        app: RunningAppInfo,
+        impact: AppEnergyImpact,
+        timeout: Double
+    ) -> ManagedAppConfiguration {
+        ManagedAppConfiguration(
+            id: UUID(),
+            bundleId: app.bundleId ?? "",
+            displayName: app.displayName,
+            appURLString: app.bundleURL?.absoluteString ?? app.executableURL?.absoluteString,
+            isEnabled: true,
+            shouldQuitBeforeSleep: true,
+            shouldRestoreAfterWake: true,
+            allowsForceTerminate: false,
+            terminationTimeoutSeconds: timeout,
+            category: .unknown,
+            riskLevel: impact.level
+        )
+    }
+
+    func sleepActionMessage(terminatedCount: Int, autoTerminatedCount: Int, suffix: String) -> String {
+        let autoText = autoTerminatedCount > 0 ? " (자동 정리 \(autoTerminatedCount)개)" : ""
+        return "\(terminatedCount)개 앱을 정리했습니다\(autoText). \(suffix)"
     }
 }
 

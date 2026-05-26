@@ -45,7 +45,7 @@ struct MenuBarPopoverView: View {
                 Text("의심 앱")
                     .font(.headline)
                 if controller.suspiciousApps.isEmpty {
-                    Text("현재 관리 대상 위험 앱이 없습니다.")
+                    Text("현재 배터리 영향이 높은 앱이 없습니다.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {
@@ -110,7 +110,7 @@ struct MenuBarPopoverView: View {
         .padding(16)
         .frame(width: 380)
         .task {
-            await controller.refreshCurrentState()
+            await controller.refreshCurrentState(updateRisk: false)
         }
     }
 }

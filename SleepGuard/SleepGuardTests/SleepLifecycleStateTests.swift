@@ -37,6 +37,96 @@ final class SleepLifecycleStateTests: XCTestCase {
         XCTAssertEqual(environment.pmsetRunner.sleepNowCallCount, 1)
         XCTAssertEqual(environment.controller.lifecycleState, .sleeping)
     }
+
+    func testAutoHighImpactAppsAreTerminatedWhenSettingEnabled() async {
+        let renderer = RunningAppInfo(
+            bundleId: "com.example.Renderer",
+            displayName: "Renderer",
+            executableURL: nil,
+            bundleURL: URL(fileURLWithPath: "/Applications/Renderer.app"),
+            processIdentifier: 124,
+            activationPolicyRawValue: NSApplication.ActivationPolicy.regular.rawValue,
+            isTerminated: false,
+            isHidden: false
+        )
+        let environment = LifecycleTestEnvironment(
+            settings: AppSettings(autoCleanOnWillSleep: true, autoQuitHighImpactAppsBeforeSleep: true),
+            additionalRunningApps: [renderer],
+            highImpactBundleIds: ["com.example.Renderer"]
+        )
+
+        await environment.controller.cleanAndSleep()
+
+        XCTAssertEqual(
+            Set(environment.terminator.terminatedApps.compactMap(\.bundleId)),
+            Set(["com.example.Utility", "com.example.Renderer"])
+        )
+    }
+
+    func testAutoHighImpactSkipsBrowserApps() async {
+        let chrome = RunningAppInfo(
+            bundleId: "com.google.Chrome",
+            displayName: "Google Chrome",
+            executableURL: nil,
+            bundleURL: URL(fileURLWithPath: "/Applications/Google Chrome.app"),
+            processIdentifier: 125,
+            activationPolicyRawValue: NSApplication.ActivationPolicy.regular.rawValue,
+            isTerminated: false,
+            isHidden: false
+        )
+        let environment = LifecycleTestEnvironment(
+            settings: AppSettings(autoCleanOnWillSleep: true, autoQuitHighImpactAppsBeforeSleep: true),
+            additionalRunningApps: [chrome],
+            highImpactBundleIds: ["com.google.Chrome"]
+        )
+
+        await environment.controller.cleanAndSleep()
+
+        XCTAssertEqual(environment.terminator.terminatedApps.map(\.bundleId), ["com.example.Utility"])
+    }
+
+    func testAnalyzeNowDoesNotResetRiskBeforeAssertionsAreParsed() async {
+        let environment = LifecycleTestEnvironment(settings: AppSettings(autoCleanOnWillSleep: true))
+        let controller = environment.controller
+        environment.pmsetRunner.assertionsOutput = Self.assertionLog(count: 7)
+
+        await controller.analyzeNow()
+        XCTAssertEqual(controller.currentRisk.level, .caution)
+
+        var observedLevelDuringPMSetRead: SleepRiskLevel?
+        environment.pmsetRunner.onAssertionsStarted = {
+            observedLevelDuringPMSetRead = await MainActor.run {
+                controller.currentRisk.level
+            }
+        }
+
+        await controller.analyzeNow()
+
+        XCTAssertEqual(observedLevelDuringPMSetRead, .caution)
+        XCTAssertEqual(controller.currentRisk.level, .caution)
+    }
+
+    func testRefreshCurrentStateCanPreserveExistingRisk() async {
+        let environment = LifecycleTestEnvironment(settings: AppSettings(autoCleanOnWillSleep: true))
+        let controller = environment.controller
+        environment.pmsetRunner.assertionsOutput = Self.assertionLog(count: 7)
+
+        await controller.analyzeNow()
+        XCTAssertEqual(controller.currentRisk.level, .caution)
+
+        await controller.refreshCurrentState(updateRisk: false)
+
+        XCTAssertEqual(controller.currentRisk.level, .caution)
+    }
+
+    private static func assertionLog(count: Int) -> String {
+        (0..<count)
+            .map {
+                let second = String(format: "%02d", $0)
+                return "2026-05-22 23:16:\(second) +0900 Assertions            PID \($0 + 100)(TestApp\($0)) PreventUserIdleSystemSleep named: \"test\""
+            }
+            .joined(separator: "\n")
+    }
 }
 
 @MainActor
@@ -53,7 +143,7 @@ private final class LifecycleTestEnvironment {
     )
     let batteryMonitor = LifecycleBatteryMonitor()
     let runningAppProvider: LifecycleRunningAppProvider
-    let energyImpactProvider = LifecycleEnergyImpactProvider()
+    let energyImpactProvider: LifecycleEnergyImpactProvider
     let terminator = LifecycleAppTerminator()
     let restorer = LifecycleAppRestorer()
     let pmsetRunner = LifecyclePMSetRunner()
@@ -66,8 +156,13 @@ private final class LifecycleTestEnvironment {
     let logCollector = LifecyclePMSetLogCollector()
     let controller: SleepGuardController
 
-    init(settings: AppSettings) {
-        runningAppProvider = LifecycleRunningAppProvider(apps: [app])
+    init(
+        settings: AppSettings,
+        additionalRunningApps: [RunningAppInfo] = [],
+        highImpactBundleIds: Set<String> = []
+    ) {
+        runningAppProvider = LifecycleRunningAppProvider(apps: [app] + additionalRunningApps)
+        energyImpactProvider = LifecycleEnergyImpactProvider(highImpactBundleIds: highImpactBundleIds)
         managedAppStore = LifecycleManagedAppStore(
             apps: [
                 ManagedApp(
@@ -124,9 +219,23 @@ private final class LifecycleRunningAppProvider: RunningAppProvider {
 }
 
 private final class LifecycleEnergyImpactProvider: AppEnergyImpactProviding {
+    private let highImpactBundleIds: Set<String>
+
+    init(highImpactBundleIds: Set<String> = []) {
+        self.highImpactBundleIds = highImpactBundleIds
+    }
+
     func impacts(for apps: [RunningAppInfo]) async -> [AppEnergyImpact] {
         apps.map {
-            AppEnergyImpact(app: $0, cpuPercent: 1, memoryMB: 1, score: 10, level: .medium, reasons: [])
+            let isHighImpact = $0.bundleId.map { highImpactBundleIds.contains($0) } ?? false
+            return AppEnergyImpact(
+                app: $0,
+                cpuPercent: isHighImpact ? 4 : 1,
+                memoryMB: isHighImpact ? 900 : 1,
+                score: isHighImpact ? 60 : 10,
+                level: isHighImpact ? .high : .medium,
+                reasons: []
+            )
         }
     }
 }
@@ -154,10 +263,13 @@ private final class LifecycleAppRestorer: AppRestoring {
 private final class LifecyclePMSetRunner: PMSetCommandRunning {
     private(set) var assertionsCallCount = 0
     private(set) var sleepNowCallCount = 0
+    var assertionsOutput = ""
+    var onAssertionsStarted: (() async -> Void)?
 
     func assertions() async throws -> String {
         assertionsCallCount += 1
-        return ""
+        await onAssertionsStarted?()
+        return assertionsOutput
     }
 
     func log() async throws -> String {

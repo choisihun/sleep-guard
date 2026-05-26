@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @StateObject var viewModel: SettingsViewModel
+    @State private var showsAutoQuitHighImpactWarning = false
 
     var body: some View {
         ScrollView {
@@ -12,7 +13,8 @@ struct SettingsView: View {
                 if let settings = viewModel.settings {
                     SectionCard(title: "동작") {
                         Toggle("로그인 시 실행", isOn: boolBinding(settings, \.launchAtLogin))
-                        Toggle("잠자기 직전 자동 정리", isOn: boolBinding(settings, \.autoCleanOnWillSleep))
+                        Toggle("잠자기/덮개 닫힘 자동 정리", isOn: boolBinding(settings, \.autoCleanOnWillSleep))
+                        Toggle("배터리 영향 높은 앱 자동 정리", isOn: autoQuitHighImpactBinding(settings))
                         Toggle("깨어난 뒤 앱 복구", isOn: boolBinding(settings, \.restoreAppsOnWake))
                         Toggle("깨어난 뒤 리포트 알림", isOn: boolBinding(settings, \.showWakeReportNotification))
                     }
@@ -57,6 +59,17 @@ struct SettingsView: View {
         .task {
             await viewModel.load()
         }
+        .alert("배터리 영향 높은 앱 자동 정리", isPresented: $showsAutoQuitHighImpactWarning) {
+            Button("켜기", role: .destructive) {
+                viewModel.settings?.shouldAutoQuitHighImpactAppsBeforeSleep = true
+                Task { await viewModel.save() }
+            }
+            Button("취소", role: .cancel) {
+                viewModel.settings?.shouldAutoQuitHighImpactAppsBeforeSleep = false
+            }
+        } message: {
+            Text("관리 앱이 아니어도 배터리 영향이 높은 앱을 잠자기 전에 graceful 종료합니다. 브라우저, 개발 도구, 문서 앱은 자동 정리 대상에서 제외됩니다.")
+        }
     }
 
     private func boolBinding(_ settings: AppSettings, _ keyPath: ReferenceWritableKeyPath<AppSettings, Bool>) -> Binding<Bool> {
@@ -87,6 +100,19 @@ struct SettingsView: View {
         } set: { value in
             settings[keyPath: keyPath] = value
             Task { await viewModel.save() }
+        }
+    }
+
+    private func autoQuitHighImpactBinding(_ settings: AppSettings) -> Binding<Bool> {
+        Binding {
+            settings.shouldAutoQuitHighImpactAppsBeforeSleep
+        } set: { value in
+            if value {
+                showsAutoQuitHighImpactWarning = true
+            } else {
+                settings.shouldAutoQuitHighImpactAppsBeforeSleep = false
+                Task { await viewModel.save() }
+            }
         }
     }
 }

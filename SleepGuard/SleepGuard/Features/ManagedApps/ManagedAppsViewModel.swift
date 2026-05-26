@@ -20,10 +20,13 @@ final class ManagedAppsViewModel: ObservableObject {
     func refresh() async {
         apps = (try? await store.fetchAll()) ?? []
         let managedBundleIds = Set(apps.map(\.bundleId))
-        runningApps = controller.runningApps.filter { $0.bundleId != nil }
+        runningApps = controller.runningApps.filter { app in
+            app.bundleId != nil && controller.canShowInManagedAppRecommendations(app)
+        }
         energyRecommendations = controller.appEnergyImpacts.filter { impact in
             guard let bundleId = impact.app.bundleId else { return false }
-            return !managedBundleIds.contains(bundleId)
+            return !managedBundleIds.contains(bundleId) &&
+                controller.canShowInManagedAppRecommendations(impact.app)
         }
     }
 

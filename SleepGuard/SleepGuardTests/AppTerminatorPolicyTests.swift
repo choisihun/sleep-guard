@@ -87,4 +87,42 @@ final class AppTerminatorPolicyTests: XCTestCase {
         config.category = .browser
         XCTAssertFalse(policy.canForceTerminate(utility, managedConfiguration: config))
     }
+
+    func testAutoHighImpactTerminationDeniesHighDataLossApps() {
+        let policy = ProtectedAppPolicy(configuration: .empty)
+        let chrome = RunningAppInfo(
+            bundleId: "com.google.Chrome",
+            displayName: "Google Chrome",
+            executableURL: nil,
+            bundleURL: nil,
+            processIdentifier: 400,
+            activationPolicyRawValue: NSApplication.ActivationPolicy.regular.rawValue,
+            isTerminated: false,
+            isHidden: false
+        )
+        let xcode = RunningAppInfo(
+            bundleId: "com.apple.dt.Xcode",
+            displayName: "Xcode",
+            executableURL: nil,
+            bundleURL: nil,
+            processIdentifier: 401,
+            activationPolicyRawValue: NSApplication.ActivationPolicy.regular.rawValue,
+            isTerminated: false,
+            isHidden: false
+        )
+        let utility = RunningAppInfo(
+            bundleId: "com.example.Renderer",
+            displayName: "Renderer",
+            executableURL: nil,
+            bundleURL: nil,
+            processIdentifier: 402,
+            activationPolicyRawValue: NSApplication.ActivationPolicy.regular.rawValue,
+            isTerminated: false,
+            isHidden: false
+        )
+
+        XCTAssertFalse(policy.canAutoTerminateHighImpactApp(chrome))
+        XCTAssertFalse(policy.canAutoTerminateHighImpactApp(xcode))
+        XCTAssertTrue(policy.canAutoTerminateHighImpactApp(utility))
+    }
 }

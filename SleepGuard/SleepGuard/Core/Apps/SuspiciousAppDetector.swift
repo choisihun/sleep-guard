@@ -7,14 +7,38 @@ struct SuspiciousAppDetector {
         self.policy = policy
     }
 
-    func suspiciousApps(runningApps: [RunningAppInfo], managedApps: [ManagedApp]) -> [RunningAppInfo] {
+    func suspiciousApps(
+        runningApps: [RunningAppInfo],
+        managedApps: [ManagedApp],
+        energyImpacts: [AppEnergyImpact] = []
+    ) -> [RunningAppInfo] {
         let enabledManagedBundleIds = Set(managedApps.filter(\.isEnabled).map(\.bundleId))
-        return runningApps.filter { app in
-            guard !policy.isProtected(app) else { return false }
-            if let bundleId = app.bundleId, enabledManagedBundleIds.contains(bundleId) {
-                return true
+        let runningByBundleId = Dictionary(
+            runningApps.compactMap { app -> (String, RunningAppInfo)? in
+                guard let bundleId = app.bundleId, !policy.isProtected(app) else { return nil }
+                return (bundleId, app)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let highImpactApps = energyImpacts
+            .filter { $0.level == .high && !policy.isProtected($0.app) }
+            .sorted {
+                if $0.score == $1.score {
+                    return $0.app.displayName.localizedCaseInsensitiveCompare($1.app.displayName) == .orderedAscending
+                }
+                return $0.score > $1.score
             }
-            return false
+
+        var result: [RunningAppInfo] = highImpactApps.map(\.app)
+        var seenBundleIds = Set(result.compactMap(\.bundleId))
+
+        for bundleId in enabledManagedBundleIds.sorted() {
+            guard !seenBundleIds.contains(bundleId), let app = runningByBundleId[bundleId] else {
+                continue
+            }
+            result.append(app)
+            seenBundleIds.insert(bundleId)
         }
+        return result
     }
 }

@@ -6,6 +6,8 @@ final class AppSettings {
     var id: UUID
     var launchAtLogin: Bool
     var autoCleanOnWillSleep: Bool
+    var didShowLaunchAtLoginPrompt: Bool?
+    var autoQuitHighImpactAppsBeforeSleep: Bool?
     var showWakeReportNotification: Bool
     var enableForceTerminate: Bool
     var defaultTerminationTimeoutSeconds: Double
@@ -19,7 +21,9 @@ final class AppSettings {
     init(
         id: UUID = UUID(),
         launchAtLogin: Bool = false,
-        autoCleanOnWillSleep: Bool = false,
+        autoCleanOnWillSleep: Bool = true,
+        didShowLaunchAtLoginPrompt: Bool = false,
+        autoQuitHighImpactAppsBeforeSleep: Bool = false,
         showWakeReportNotification: Bool = true,
         enableForceTerminate: Bool = false,
         defaultTerminationTimeoutSeconds: Double = 8,
@@ -33,6 +37,8 @@ final class AppSettings {
         self.id = id
         self.launchAtLogin = launchAtLogin
         self.autoCleanOnWillSleep = autoCleanOnWillSleep
+        self.didShowLaunchAtLoginPrompt = didShowLaunchAtLoginPrompt
+        self.autoQuitHighImpactAppsBeforeSleep = autoQuitHighImpactAppsBeforeSleep
         self.showWakeReportNotification = showWakeReportNotification
         self.enableForceTerminate = enableForceTerminate
         self.defaultTerminationTimeoutSeconds = defaultTerminationTimeoutSeconds
@@ -52,5 +58,15 @@ enum AppSettingsDefaults {
 extension AppSettings {
     var effectiveMaxAppsToQuitBeforeSleep: Int {
         maxAppsToQuitBeforeSleep ?? AppSettingsDefaults.maxAppsToQuitBeforeSleep
+    }
+
+    var shouldAutoQuitHighImpactAppsBeforeSleep: Bool {
+        get { autoQuitHighImpactAppsBeforeSleep ?? false }
+        set { autoQuitHighImpactAppsBeforeSleep = newValue }
+    }
+
+    var hasShownLaunchAtLoginPrompt: Bool {
+        get { didShowLaunchAtLoginPrompt ?? false }
+        set { didShowLaunchAtLoginPrompt = newValue }
     }
 }

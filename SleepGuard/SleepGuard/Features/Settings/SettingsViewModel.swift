@@ -59,6 +59,8 @@ final class SettingsViewModel: ObservableObject {
 private struct SettingsSnapshot {
     var launchAtLogin: Bool
     var autoCleanOnWillSleep: Bool
+    var didShowLaunchAtLoginPrompt: Bool
+    var autoQuitHighImpactAppsBeforeSleep: Bool
     var showWakeReportNotification: Bool
     var enableForceTerminate: Bool
     var defaultTerminationTimeoutSeconds: Double
@@ -70,6 +72,8 @@ private struct SettingsSnapshot {
     init(_ settings: AppSettings) {
         launchAtLogin = settings.launchAtLogin
         autoCleanOnWillSleep = settings.autoCleanOnWillSleep
+        didShowLaunchAtLoginPrompt = settings.hasShownLaunchAtLoginPrompt
+        autoQuitHighImpactAppsBeforeSleep = settings.shouldAutoQuitHighImpactAppsBeforeSleep
         showWakeReportNotification = settings.showWakeReportNotification
         enableForceTerminate = settings.enableForceTerminate
         defaultTerminationTimeoutSeconds = settings.defaultTerminationTimeoutSeconds
@@ -82,6 +86,8 @@ private struct SettingsSnapshot {
     func apply(to settings: AppSettings) {
         settings.launchAtLogin = launchAtLogin
         settings.autoCleanOnWillSleep = autoCleanOnWillSleep
+        settings.hasShownLaunchAtLoginPrompt = didShowLaunchAtLoginPrompt
+        settings.shouldAutoQuitHighImpactAppsBeforeSleep = autoQuitHighImpactAppsBeforeSleep
         settings.showWakeReportNotification = showWakeReportNotification
         settings.enableForceTerminate = enableForceTerminate
         settings.defaultTerminationTimeoutSeconds = defaultTerminationTimeoutSeconds

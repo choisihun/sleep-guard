@@ -53,7 +53,7 @@ struct MainWindowView: View {
             }
         }
         .task {
-            await viewModel.controller.refreshCurrentState()
+            await viewModel.controller.refreshCurrentState(updateRisk: false)
             await viewModel.controller.reloadHistory()
         }
     }

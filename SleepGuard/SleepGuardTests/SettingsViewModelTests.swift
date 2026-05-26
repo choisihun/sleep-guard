@@ -3,6 +3,13 @@ import XCTest
 
 @MainActor
 final class SettingsViewModelTests: XCTestCase {
+    func testDefaultSettingsCleanOnSystemSleepButDoNotAutoQuitHighImpactApps() {
+        let settings = AppSettings()
+
+        XCTAssertTrue(settings.autoCleanOnWillSleep)
+        XCTAssertFalse(settings.shouldAutoQuitHighImpactAppsBeforeSleep)
+    }
+
     func testSaveRollsBackWhenLoginItemSyncFails() async {
         let settings = AppSettings(launchAtLogin: false)
         let store = RecordingSettingsStore(settings: settings)

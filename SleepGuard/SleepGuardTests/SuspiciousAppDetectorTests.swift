@@ -52,6 +52,68 @@ struct SuspiciousAppDetectorTests {
         #expect(suspicious.map(\.displayName) == ["HeavyApp"])
     }
 
+    @Test func detectsHighEnergyAppsBeforeTheyAreManaged() {
+        let codex = RunningAppInfo(
+            bundleId: "com.openai.codex",
+            displayName: "Codex",
+            executableURL: nil,
+            bundleURL: URL(fileURLWithPath: "/Applications/Codex.app"),
+            processIdentifier: 301,
+            activationPolicyRawValue: NSApplication.ActivationPolicy.regular.rawValue,
+            isTerminated: false,
+            isHidden: false
+        )
+        let impact = AppEnergyImpact(
+            app: codex,
+            cpuPercent: 35,
+            memoryMB: 900,
+            score: 80,
+            level: .high,
+            reasons: ["CPU 높음"]
+        )
+
+        let suspicious = SuspiciousAppDetector().suspiciousApps(
+            runningApps: [codex],
+            managedApps: [],
+            energyImpacts: [impact]
+        )
+
+        #expect(suspicious.map(\.displayName) == ["Codex"])
+    }
+
+    @Test func ignoresProtectedHighEnergyApps() {
+        let finder = RunningAppInfo(
+            bundleId: "com.apple.finder",
+            displayName: "Finder",
+            executableURL: nil,
+            bundleURL: URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app"),
+            processIdentifier: 302,
+            activationPolicyRawValue: NSApplication.ActivationPolicy.regular.rawValue,
+            isTerminated: false,
+            isHidden: false
+        )
+        let impact = AppEnergyImpact(
+            app: finder,
+            cpuPercent: 80,
+            memoryMB: 500,
+            score: 90,
+            level: .high,
+            reasons: ["CPU 높음"]
+        )
+
+        let suspicious = SuspiciousAppDetector(
+            policy: ProtectedAppPolicy(
+                configuration: AppProtectionConfiguration(
+                    protectedBundleIds: ["com.apple.finder"],
+                    protectedProcessNames: ["Finder"]
+                )
+            )
+        )
+        .suspiciousApps(runningApps: [finder], managedApps: [], energyImpacts: [impact])
+
+        #expect(suspicious.isEmpty)
+    }
+
     @Test func ignoresDisabledManagedApps() {
         let app = RunningAppInfo(
             bundleId: "com.example.HeavyApp",
