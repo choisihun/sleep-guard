@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let container = try AppDependencyContainer()
             self.container = container
+            SleepGuardShortcutCoordinator.shared.register(container: container)
 
             let mainWindowController = MainWindowController(container: container)
             self.mainWindowController = mainWindowController

@@ -6,15 +6,44 @@ final class ManagedAppsViewModel: ObservableObject {
     @Published private(set) var apps: [ManagedApp] = []
     @Published private(set) var runningApps: [RunningAppInfo] = []
     @Published private(set) var energyRecommendations: [AppEnergyImpact] = []
+    @Published private(set) var isSyncing = false
     @Published var recommendationLimit = 8
     @Published var lastMessage = ""
 
     let controller: SleepGuardController
     private let store: ManagedAppStoring
+    private let autoSyncIntervalNanoseconds: UInt64
 
-    init(controller: SleepGuardController, store: ManagedAppStoring) {
+    init(
+        controller: SleepGuardController,
+        store: ManagedAppStoring,
+        autoSyncIntervalNanoseconds: UInt64 = 10_000_000_000
+    ) {
         self.controller = controller
         self.store = store
+        self.autoSyncIntervalNanoseconds = autoSyncIntervalNanoseconds
+    }
+
+    func autoSyncCurrentState() async {
+        await syncWithCurrentState()
+
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(nanoseconds: autoSyncIntervalNanoseconds)
+            } catch {
+                return
+            }
+            await syncWithCurrentState()
+        }
+    }
+
+    func syncWithCurrentState() async {
+        guard !isSyncing else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+
+        await controller.refreshCurrentState(updateRisk: false)
+        await refresh()
     }
 
     func refresh() async {

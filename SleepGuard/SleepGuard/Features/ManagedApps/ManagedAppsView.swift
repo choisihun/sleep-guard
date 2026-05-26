@@ -35,8 +35,7 @@ struct ManagedAppsView: View {
         }
         .navigationTitle("Managed Apps")
         .task {
-            await viewModel.controller.refreshCurrentState(updateRisk: false)
-            await viewModel.refresh()
+            await viewModel.autoSyncCurrentState()
         }
     }
 }

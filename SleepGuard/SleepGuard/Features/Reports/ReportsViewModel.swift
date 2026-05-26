@@ -3,13 +3,34 @@ import Foundation
 
 @MainActor
 final class ReportsViewModel: ObservableObject {
-    let controller: SleepGuardController
+    @Published private(set) var isSyncing = false
 
-    init(controller: SleepGuardController) {
+    let controller: SleepGuardController
+    private let autoSyncIntervalNanoseconds: UInt64
+
+    init(controller: SleepGuardController, autoSyncIntervalNanoseconds: UInt64 = 10_000_000_000) {
         self.controller = controller
+        self.autoSyncIntervalNanoseconds = autoSyncIntervalNanoseconds
+    }
+
+    func autoSyncHistory() async {
+        await refresh()
+
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(nanoseconds: autoSyncIntervalNanoseconds)
+            } catch {
+                return
+            }
+            await refresh()
+        }
     }
 
     func refresh() async {
+        guard !isSyncing else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+
         await controller.reloadHistory()
     }
 

@@ -36,13 +36,6 @@ struct ReportsListView: View {
                 }
             }
             .navigationTitle("Reports")
-            .toolbar {
-                Button {
-                    Task { await viewModel.refresh() }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-            }
         } detail: {
             if let selectedReportId,
                let report = controller.recentReports.first(where: { $0.id == selectedReportId }) {
@@ -68,7 +61,7 @@ struct ReportsListView: View {
             }
         }
         .task {
-            await viewModel.refresh()
+            await viewModel.autoSyncHistory()
         }
     }
 }

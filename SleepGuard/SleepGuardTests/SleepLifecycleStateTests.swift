@@ -119,6 +119,88 @@ final class SleepLifecycleStateTests: XCTestCase {
         XCTAssertEqual(controller.currentRisk.level, .caution)
     }
 
+    func testManagedAppsAutoSyncRefreshesRecommendationsWhileVisible() async throws {
+        let renderer = RunningAppInfo(
+            bundleId: "com.example.Renderer",
+            displayName: "Renderer",
+            executableURL: nil,
+            bundleURL: URL(fileURLWithPath: "/Applications/Renderer.app"),
+            processIdentifier: 124,
+            activationPolicyRawValue: NSApplication.ActivationPolicy.regular.rawValue,
+            isTerminated: false,
+            isHidden: false
+        )
+        let environment = LifecycleTestEnvironment(
+            settings: AppSettings(autoCleanOnWillSleep: true),
+            highImpactBundleIds: ["com.example.Renderer"]
+        )
+        let viewModel = ManagedAppsViewModel(
+            controller: environment.controller,
+            store: environment.managedAppStore,
+            autoSyncIntervalNanoseconds: 20_000_000
+        )
+
+        let syncTask = Task {
+            await viewModel.autoSyncCurrentState()
+        }
+        try await Task.sleep(nanoseconds: 30_000_000)
+
+        XCTAssertTrue(viewModel.energyRecommendations.isEmpty)
+
+        environment.runningAppProvider.apps.append(renderer)
+        try await Task.sleep(nanoseconds: 80_000_000)
+
+        syncTask.cancel()
+        await syncTask.value
+
+        XCTAssertEqual(viewModel.energyRecommendations.compactMap(\.app.bundleId), ["com.example.Renderer"])
+    }
+
+    func testReportsAutoSyncRefreshesHistoryWhileVisible() async throws {
+        let environment = LifecycleTestEnvironment(settings: AppSettings(autoCleanOnWillSleep: true))
+        let viewModel = ReportsViewModel(
+            controller: environment.controller,
+            autoSyncIntervalNanoseconds: 20_000_000
+        )
+
+        let syncTask = Task {
+            await viewModel.autoSyncHistory()
+        }
+        try await Task.sleep(nanoseconds: 30_000_000)
+
+        XCTAssertTrue(environment.controller.recentReports.isEmpty)
+
+        let session = try await environment.sessionStore.create(
+            startedAt: Date(),
+            batteryBefore: 80,
+            wasManualSleep: false
+        )
+        _ = try await environment.reportStore.save(
+            draft: SleepReportDraft(
+                riskScore: 0,
+                riskLevel: .good,
+                summaryText: "테스트 리포트",
+                recommendations: [],
+                darkWakeCount: 0,
+                wakeRequestCount: 0,
+                assertionCount: 0,
+                bluetoothDelayCount: 0,
+                tcpKeepAliveCount: 0,
+                rawPMSetExcerpt: "",
+                topSuspectNames: [],
+                eventAnalysisStatus: .available,
+                pmsetDiagnostics: nil
+            ),
+            sessionId: session.id
+        )
+        try await Task.sleep(nanoseconds: 80_000_000)
+
+        syncTask.cancel()
+        await syncTask.value
+
+        XCTAssertEqual(environment.controller.recentReports.map(\.summaryText), ["테스트 리포트"])
+    }
+
     private static func assertionLog(count: Int) -> String {
         (0..<count)
             .map {
