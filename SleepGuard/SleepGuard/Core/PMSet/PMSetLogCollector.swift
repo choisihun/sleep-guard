@@ -83,7 +83,7 @@ nonisolated struct PMSetLogCollector: PMSetLogCollecting {
                     maxRawExcerptLines: maxRawExcerptLines,
                     maxManualTailLines: maxManualTailLines
                 )
-                try await commandRunner.streamLog { line in
+                try await commandRunner.streamLog(from: window.start, to: window.end) { line in
                     accumulator.consume(line)
                 }
                 let collectedAt = Date()

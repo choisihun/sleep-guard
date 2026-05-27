@@ -128,6 +128,19 @@ struct PMSetLogCollectorTests {
         #expect(collection.diagnostics.sessionEventLineCount == 5)
     }
 
+    @Test func streamsOnlySessionAnalysisWindowWhenSessionDatesAreAvailable() async throws {
+        let runner = StubPMSetRunner(logResults: [.success(Self.sampleLog)])
+        let collector = PMSetLogCollector(commandRunner: runner, retryDelays: [0], paddingSeconds: 600)
+        let start = try #require(Self.date("2026-05-22 23:10:00 +0900"))
+        let end = try #require(Self.date("2026-05-22 23:19:00 +0900"))
+
+        _ = await collector.collect(sessionStart: start, sessionEnd: end, includeRawExcerpt: true)
+
+        #expect(runner.rangedStreamRequests.count == 1)
+        #expect(runner.rangedStreamRequests.first?.start == start.addingTimeInterval(-600))
+        #expect(runner.rangedStreamRequests.first?.end == end.addingTimeInterval(600))
+    }
+
     private static func date(_ string: String) -> Date? {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -145,6 +158,7 @@ struct PMSetLogCollectorTests {
 
 private final class StubPMSetRunner: PMSetCommandRunning {
     private var logResults: [Result<String, Error>]
+    private(set) var rangedStreamRequests: [(start: Date?, end: Date?)] = []
 
     init(logResults: [Result<String, Error>]) {
         self.logResults = logResults
@@ -159,6 +173,19 @@ private final class StubPMSetRunner: PMSetCommandRunning {
             throw CommandError.emptyOutput
         }
         return try logResults.removeFirst().get()
+    }
+
+    func streamLog(_ lineHandler: @escaping @Sendable (String) -> Void) async throws {
+        let rawLog = try await log()
+        rawLog
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+            .forEach(lineHandler)
+    }
+
+    func streamLog(from start: Date?, to end: Date?, _ lineHandler: @escaping @Sendable (String) -> Void) async throws {
+        rangedStreamRequests.append((start, end))
+        try await streamLog(lineHandler)
     }
 
     func sched() async throws -> String {
