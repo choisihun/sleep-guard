@@ -5,7 +5,15 @@ struct AppPickerView: View {
 
     var body: some View {
         SectionCard(title: "배터리 영향 상위 앱") {
-            Stepper("상위 \(viewModel.recommendationLimit)개", value: $viewModel.recommendationLimit, in: 3...20, step: 1)
+            Stepper(value: $viewModel.recommendationLimit, in: 3...20, step: 1) {
+                HStack(spacing: 0) {
+                    Text("상위 ")
+                    Text("\(viewModel.recommendationLimit)")
+                        .font(.body.monospacedDigit())
+                        .frame(width: 24, alignment: .trailing)
+                    Text("개")
+                }
+            }
 
             if viewModel.energyRecommendations.isEmpty {
                 Text("추천할 실행 앱이 없습니다.")

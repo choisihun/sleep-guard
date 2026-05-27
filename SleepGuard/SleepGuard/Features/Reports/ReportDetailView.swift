@@ -117,7 +117,9 @@ struct ReportDetailView: View {
                     .frame(minHeight: 180)
                 }
             }
-            .padding(24)
+            .frame(maxWidth: 820, alignment: .leading)
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
