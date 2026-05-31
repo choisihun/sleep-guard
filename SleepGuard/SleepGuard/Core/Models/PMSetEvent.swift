@@ -10,6 +10,7 @@ nonisolated enum PMSetEventCategory: String, Codable, CaseIterable, Identifiable
     case sleepService
     case bluetooth
     case tcpKeepAlive
+    case usbC
     case maintenanceWake
     case other
 
@@ -26,6 +27,7 @@ nonisolated enum PMSetEventCategory: String, Codable, CaseIterable, Identifiable
         case .sleepService: "SleepService"
         case .bluetooth: "Bluetooth"
         case .tcpKeepAlive: "TCP KeepAlive"
+        case .usbC: "USB-C"
         case .maintenanceWake: "Maintenance Wake"
         case .other: "Other"
         }

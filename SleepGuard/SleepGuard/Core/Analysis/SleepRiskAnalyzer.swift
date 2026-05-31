@@ -8,6 +8,7 @@ struct SleepRiskInput {
     var assertionCount: Int
     var bluetoothDelayCount: Int
     var tcpKeepAliveCount: Int
+    var usbCWakeCount: Int = 0
     var suspiciousProcessNames: [String]
 }
 
@@ -20,13 +21,19 @@ struct SleepRiskAnalyzer {
     func analyze(_ input: SleepRiskInput) -> SleepRiskResult {
         var score = 0
         score += min(input.drainPercent * 4, 30)
-        if input.drainPerHour > 1.5 { score += 20 }
-        if input.drainPerHour > 3 { score += 15 }
+        if input.drainPercent >= BatteryDrainThresholds.highTotalDrainPercent {
+            score += 15
+        } else if input.drainPercent >= BatteryDrainThresholds.notableTotalDrainPercent {
+            score += 8
+        }
+        if input.drainPerHour > BatteryDrainThresholds.highDrainPerHour { score += 20 }
+        if input.drainPerHour > BatteryDrainThresholds.severeDrainPerHour { score += 15 }
         score += min(input.darkWakeCount, 30)
         score += min(input.wakeRequestCount * 2, 20)
         score += min(input.assertionCount * 5, 25)
         score += min(input.bluetoothDelayCount * 3, 15)
         score += input.tcpKeepAliveCount > 0 ? 10 : 0
+        score += min(input.usbCWakeCount * 2, 10)
 
         score += min(input.suspiciousProcessNames.count * 3, 15)
 

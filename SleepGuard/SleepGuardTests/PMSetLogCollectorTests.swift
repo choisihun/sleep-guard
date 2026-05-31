@@ -79,6 +79,21 @@ struct PMSetLogCollectorTests {
         #expect(collection.diagnostics.errorDescription?.isEmpty == false)
     }
 
+    @Test func keepsMatchedEventsCollectedBeforeCommandTimeout() async throws {
+        let runner = TimeoutAfterLinesPMSetRunner(lines: Self.sampleLog.split(separator: "\n").map(String.init))
+        let collector = PMSetLogCollector(commandRunner: runner, retryDelays: [0], paddingSeconds: 0)
+        let start = try #require(Self.date("2026-05-22 23:10:00 +0900"))
+        let end = try #require(Self.date("2026-05-22 23:19:00 +0900"))
+
+        let collection = await collector.collect(sessionStart: start, sessionEnd: end, includeRawExcerpt: true)
+
+        #expect(collection.status == .available)
+        #expect(collection.events.contains { $0.category == .darkWake })
+        #expect(collection.events.contains { $0.category == .wakeRequest && $0.processName == "dasd" })
+        #expect(collection.diagnostics.rawLogLineCount == 4)
+        #expect(collection.diagnostics.errorDescription?.contains("Command timed out") == true)
+    }
+
     @Test func capsManualTailWithoutKeepingFullPMSetLog() async throws {
         let rawLog = (0..<10)
             .map { index in
@@ -185,6 +200,39 @@ private final class StubPMSetRunner: PMSetCommandRunning {
 
     func streamLog(from start: Date?, to end: Date?, _ lineHandler: @escaping @Sendable (String) -> Void) async throws {
         rangedStreamRequests.append((start, end))
+        try await streamLog(lineHandler)
+    }
+
+    func sched() async throws -> String {
+        ""
+    }
+
+    func sleepNow() async throws {}
+}
+
+private final class TimeoutAfterLinesPMSetRunner: PMSetCommandRunning {
+    private let lines: [String]
+
+    init(lines: [String]) {
+        self.lines = lines
+    }
+
+    func assertions() async throws -> String {
+        ""
+    }
+
+    func log() async throws -> String {
+        ""
+    }
+
+    func streamLog(_ lineHandler: @escaping @Sendable (String) -> Void) async throws {
+        for line in lines {
+            lineHandler(line)
+        }
+        throw CommandError.timedOut
+    }
+
+    func streamLog(from start: Date?, to end: Date?, _ lineHandler: @escaping @Sendable (String) -> Void) async throws {
         try await streamLog(lineHandler)
     }
 

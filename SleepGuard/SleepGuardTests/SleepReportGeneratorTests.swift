@@ -77,6 +77,65 @@ struct SleepReportGeneratorTests {
         #expect(draft.recommendations.contains { $0.contains("이벤트 분석이 제한") })
     }
 
+    @Test func recommendsCheckingUSBCDevicesWhenWakeSignalsRepeat() {
+        let rawLog = """
+        2026-05-22 23:15:12 +0900 DarkWake              DarkWake from Normal Sleep [CDN] : due to USB-C_plug Using BATT (Charge:72%)
+        2026-05-22 23:17:20 +0900 kernel                Port-USB-C driver is slow to respond
+        """
+        let events = PMSetLogParser().parse(rawLog)
+        let session = SleepSession(
+            sleepStartedAt: Date(timeIntervalSince1970: 0),
+            wokeAt: Date(timeIntervalSince1970: 3600),
+            batteryBefore: 73,
+            batteryAfter: 68,
+            drainPercent: 5,
+            drainPerHour: 5,
+            durationSeconds: 3600,
+            wasManualSleep: true
+        )
+
+        let draft = SleepReportGenerator().generate(
+            session: session,
+            events: events,
+            rawPMSetExcerpt: rawLog,
+            runningApps: [],
+            terminatedApps: [],
+            restoredApps: []
+        )
+
+        #expect(draft.summaryText.contains("USB-C/외부 장치"))
+        #expect(draft.summaryText.contains("전체 감소량"))
+        #expect(draft.recommendations.contains { $0.contains("USB-C/외부 장치") })
+    }
+
+    @Test func explainsLargeTotalDrainWithoutCallingUnavailableAnalysisStable() {
+        let session = SleepSession(
+            sleepStartedAt: Date(timeIntervalSince1970: 0),
+            wokeAt: Date(timeIntervalSince1970: 25 * 3600),
+            batteryBefore: 93,
+            batteryAfter: 77,
+            drainPercent: 16,
+            drainPerHour: 0.63,
+            durationSeconds: 25 * 3600,
+            wasManualSleep: true
+        )
+
+        let draft = SleepReportGenerator().generate(
+            session: session,
+            events: [],
+            rawPMSetExcerpt: "",
+            runningApps: [],
+            terminatedApps: [],
+            restoredApps: [],
+            eventAnalysisStatus: .unavailable
+        )
+
+        #expect(draft.riskLevel == .caution)
+        #expect(draft.summaryText.contains("총 감소량이 커"))
+        #expect(!draft.summaryText.contains("안정적으로 보입니다"))
+        #expect(draft.recommendations.contains { $0.contains("총 배터리 감소량") })
+    }
+
     @Test func warnsForLegacyHighDrainReportsWithoutTrackedEventAnalysisStatus() {
         let report = SleepReport(
             sessionId: UUID(),

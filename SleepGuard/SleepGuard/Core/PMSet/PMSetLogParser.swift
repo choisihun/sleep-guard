@@ -3,12 +3,18 @@ import Foundation
 nonisolated struct PMSetLogParser {
     var wakeRequestParser = PMSetWakeRequestParser()
     var assertionParser = PMSetAssertionParser()
+    private let dateFormatter: DateFormatter
 
-    private var dateFormatter: DateFormatter {
+    init(
+        wakeRequestParser: PMSetWakeRequestParser = PMSetWakeRequestParser(),
+        assertionParser: PMSetAssertionParser = PMSetAssertionParser()
+    ) {
+        self.wakeRequestParser = wakeRequestParser
+        self.assertionParser = assertionParser
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
-        return formatter
+        self.dateFormatter = formatter
     }
 
     func parse(_ rawLog: String) -> [PMSetEvent] {
@@ -16,6 +22,10 @@ nonisolated struct PMSetLogParser {
             .split(separator: "\n", omittingEmptySubsequences: true)
             .flatMap { parseLine(String($0)) }
             .sorted { $0.timestamp < $1.timestamp }
+    }
+
+    func timestamp(from line: String) -> Date? {
+        parseTimestamp(from: line)
     }
 
     func events(_ rawLog: String, around start: Date?, end: Date?, paddingSeconds: TimeInterval = 600) -> [PMSetEvent] {
@@ -66,6 +76,8 @@ nonisolated struct PMSetLogParser {
             category = .sleepService
         } else if lower.contains("bluetooth") && lower.contains("sleep") {
             category = .bluetooth
+        } else if isUSBCLine(lower) {
+            category = .usbC
         } else if lower.contains("maintenancewake") || lower.contains("maintenance wake") {
             category = .maintenanceWake
         }
@@ -145,5 +157,12 @@ nonisolated struct PMSetLogParser {
             return suffix.split(separator: " ").first.map(String.init)
         }
         return nil
+    }
+
+    private func isUSBCLine(_ lowercasedLine: String) -> Bool {
+        lowercasedLine.contains("usb-c")
+            || lowercasedLine.contains("usb_c")
+            || lowercasedLine.contains("usbc")
+            || lowercasedLine.contains("port-usb")
     }
 }

@@ -234,9 +234,13 @@ final class SleepGuardController: ObservableObject {
             return
         }
         if settings.autoCleanOnWillSleep {
-            await prepareForSleep(wasManualSleep: false, shouldEnterSleep: false)
+            await prepareForSleep(wasManualSleep: false, shouldEnterSleep: false, settings: settings)
         } else {
-            await captureSleepStartOnly(wasManualSleep: false)
+            let optimizationMessage = await applyBatterySleepOptimizationIfNeeded(settings: settings)
+            let didCapture = await captureSleepStartOnly(wasManualSleep: false)
+            if didCapture, let optimizationMessage {
+                lastActionMessage = optimizationMessage
+            }
         }
     }
 
@@ -408,7 +412,8 @@ final class SleepGuardController: ObservableObject {
         recentReports = (try? await reportStore.fetchRecent(limit: 50)) ?? []
     }
 
-    private func captureSleepStartOnly(wasManualSleep: Bool) async {
+    @discardableResult
+    private func captureSleepStartOnly(wasManualSleep: Bool) async -> Bool {
         let battery = batteryMonitor.currentBatteryInfo() ?? .unknown
         let running = runningAppProvider.runningApplications()
         do {
@@ -424,18 +429,26 @@ final class SleepGuardController: ObservableObject {
                     )
                 )
             }
+            return true
         } catch {
             lastActionMessage = "수면 시작 저장 실패: \(error.localizedDescription)"
+            return false
         }
     }
 
-    private func prepareForSleep(wasManualSleep: Bool, shouldEnterSleep: Bool) async {
+    private func prepareForSleep(wasManualSleep: Bool, shouldEnterSleep: Bool, settings prefetchedSettings: AppSettings? = nil) async {
         guard !isWorking else { return }
         isWorking = true
         defer { isWorking = false }
 
         do {
-            let settings = try await settingsStore.fetchOrCreate()
+            let settings: AppSettings
+            if let prefetchedSettings {
+                settings = prefetchedSettings
+            } else {
+                settings = try await settingsStore.fetchOrCreate()
+            }
+            let optimizationMessage = await applyBatterySleepOptimizationIfNeeded(settings: settings)
             let battery = batteryMonitor.currentBatteryInfo() ?? .unknown
             let running = runningAppProvider.runningApplications()
             runningApps = running
@@ -490,23 +503,32 @@ final class SleepGuardController: ObservableObject {
             if shouldEnterSleep {
                 do {
                     try await pmsetRunner.sleepNow()
-                    lastActionMessage = sleepActionMessage(
-                        terminatedCount: terminated.count,
-                        autoTerminatedCount: autoTerminatedCount,
-                        suffix: "sleepnow를 요청했습니다."
+                    lastActionMessage = actionMessage(
+                        optimizationMessage,
+                        sleepActionMessage(
+                            terminatedCount: terminated.count,
+                            autoTerminatedCount: autoTerminatedCount,
+                            suffix: "sleepnow를 요청했습니다."
+                        )
                     )
                 } catch {
-                    lastActionMessage = sleepActionMessage(
-                        terminatedCount: terminated.count,
-                        autoTerminatedCount: autoTerminatedCount,
-                        suffix: "sleep 진입 실패: \(error.localizedDescription)"
+                    lastActionMessage = actionMessage(
+                        optimizationMessage,
+                        sleepActionMessage(
+                            terminatedCount: terminated.count,
+                            autoTerminatedCount: autoTerminatedCount,
+                            suffix: "sleep 진입 실패: \(error.localizedDescription)"
+                        )
                     )
                 }
             } else {
-                lastActionMessage = sleepActionMessage(
-                    terminatedCount: terminated.count,
-                    autoTerminatedCount: autoTerminatedCount,
-                    suffix: "willSleep 정리 완료"
+                lastActionMessage = actionMessage(
+                    optimizationMessage,
+                    sleepActionMessage(
+                        terminatedCount: terminated.count,
+                        autoTerminatedCount: autoTerminatedCount,
+                        suffix: "willSleep 정리 완료"
+                    )
                 )
             }
         } catch {
@@ -651,6 +673,32 @@ private extension SleepGuardController {
     func sleepActionMessage(terminatedCount: Int, autoTerminatedCount: Int, suffix: String) -> String {
         let autoText = autoTerminatedCount > 0 ? " (자동 정리 \(autoTerminatedCount)개)" : ""
         return "\(terminatedCount)개 앱을 정리했습니다\(autoText). \(suffix)"
+    }
+
+    func actionMessage(_ messages: String?...) -> String {
+        messages.compactMap { message in
+            guard let message, !message.isEmpty else { return nil }
+            return message
+        }
+        .joined(separator: " ")
+    }
+
+    func applyBatterySleepOptimizationIfNeeded(settings: AppSettings) async -> String? {
+        guard settings.shouldApplyBatterySleepOptimization else { return nil }
+
+        let result = await pmsetRunner.applyBatterySleepOptimization()
+        if result.isFullyApplied {
+            return "배터리 수면 최적화를 적용했습니다."
+        }
+
+        let failedSettings = result.failures.map(\.setting).joined(separator: ", ")
+        if result.hasPermissionFailure {
+            return "배터리 수면 최적화 실패: 관리자 권한이 필요합니다. 실패 항목: \(failedSettings)"
+        }
+        if !result.appliedSettings.isEmpty {
+            return "배터리 수면 최적화를 일부만 적용했습니다. 실패 항목: \(failedSettings)"
+        }
+        return "배터리 수면 최적화 실패: \(failedSettings)"
     }
 }
 

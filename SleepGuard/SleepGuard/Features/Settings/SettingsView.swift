@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @StateObject var viewModel: SettingsViewModel
     @State private var showsAutoQuitHighImpactWarning = false
+    @State private var showsBatterySleepOptimizationWarning = false
 
     var body: some View {
         ScrollView {
@@ -15,6 +16,10 @@ struct SettingsView: View {
                         Toggle("로그인 시 실행", isOn: boolBinding(settings, \.launchAtLogin))
                         Toggle("잠자기/덮개 닫힘 자동 정리", isOn: boolBinding(settings, \.autoCleanOnWillSleep))
                         Toggle("배터리 영향 높은 앱 자동 정리", isOn: autoQuitHighImpactBinding(settings))
+                        Toggle("배터리 수면 최적화", isOn: batterySleepOptimizationBinding(settings))
+                        Text("배터리 전원에서 TCP keepalive, Power Nap, Wake on LAN, proximity wake를 끕니다. 잠든 동안 네트워크 알림, 클라우드 갱신, 주변 기기 깨우기가 지연될 수 있습니다.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                         Toggle("깨어난 뒤 앱 복구", isOn: boolBinding(settings, \.restoreAppsOnWake))
                         Toggle("깨어난 뒤 리포트 알림", isOn: boolBinding(settings, \.showWakeReportNotification))
                     }
@@ -70,6 +75,17 @@ struct SettingsView: View {
         } message: {
             Text("관리 앱이 아니어도 배터리 영향이 높은 앱을 잠자기 전에 graceful 종료합니다. 브라우저, 개발 도구, 문서 앱은 자동 정리 대상에서 제외됩니다.")
         }
+        .alert("배터리 수면 최적화", isPresented: $showsBatterySleepOptimizationWarning) {
+            Button("켜기") {
+                viewModel.settings?.shouldApplyBatterySleepOptimization = true
+                Task { await viewModel.save() }
+            }
+            Button("취소", role: .cancel) {
+                viewModel.settings?.shouldApplyBatterySleepOptimization = false
+            }
+        } message: {
+            Text("잠자기 전에 배터리 전원용 pmset wake 설정을 낮춥니다. 네트워크 유지, Bluetooth proximity wake, Wake on LAN 동작이 제한될 수 있으며 macOS가 관리자 권한을 요구하면 적용이 실패할 수 있습니다.")
+        }
     }
 
     private func boolBinding(_ settings: AppSettings, _ keyPath: ReferenceWritableKeyPath<AppSettings, Bool>) -> Binding<Bool> {
@@ -111,6 +127,19 @@ struct SettingsView: View {
                 showsAutoQuitHighImpactWarning = true
             } else {
                 settings.shouldAutoQuitHighImpactAppsBeforeSleep = false
+                Task { await viewModel.save() }
+            }
+        }
+    }
+
+    private func batterySleepOptimizationBinding(_ settings: AppSettings) -> Binding<Bool> {
+        Binding {
+            settings.shouldApplyBatterySleepOptimization
+        } set: { value in
+            if value {
+                showsBatterySleepOptimizationWarning = true
+            } else {
+                settings.shouldApplyBatterySleepOptimization = false
                 Task { await viewModel.save() }
             }
         }

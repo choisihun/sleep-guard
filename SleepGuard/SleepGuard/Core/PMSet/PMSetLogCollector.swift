@@ -74,15 +74,15 @@ nonisolated struct PMSetLogCollector: PMSetLogCollecting {
                 try? await Task.sleep(nanoseconds: delay)
             }
 
+            let accumulator = PMSetLogLineAccumulator(
+                sessionStart: sessionStart,
+                sessionEnd: sessionEnd,
+                paddingSeconds: paddingSeconds,
+                includeRawExcerpt: includeRawExcerpt,
+                maxRawExcerptLines: maxRawExcerptLines,
+                maxManualTailLines: maxManualTailLines
+            )
             do {
-                let accumulator = PMSetLogLineAccumulator(
-                    sessionStart: sessionStart,
-                    sessionEnd: sessionEnd,
-                    paddingSeconds: paddingSeconds,
-                    includeRawExcerpt: includeRawExcerpt,
-                    maxRawExcerptLines: maxRawExcerptLines,
-                    maxManualTailLines: maxManualTailLines
-                )
                 try await commandRunner.streamLog(from: window.start, to: window.end) { line in
                     accumulator.consume(line)
                 }
@@ -119,7 +119,30 @@ nonisolated struct PMSetLogCollector: PMSetLogCollecting {
 
                 lastError = diagnostics.errorDescription
             } catch {
+                let collectedAt = Date()
+                let parsed = accumulator.snapshot()
+                lastCollectedAt = collectedAt
+                lastRawLog = parsed.rawExcerpt
+                lastRawLogLineCount = parsed.rawLogLineCount
                 lastError = error.localizedDescription
+
+                if !parsed.events.isEmpty {
+                    return PMSetLogCollection(
+                        rawLog: parsed.rawExcerpt,
+                        rawExcerpt: parsed.rawExcerpt,
+                        events: parsed.events,
+                        status: .available,
+                        diagnostics: PMSetLogDiagnostics(
+                            collectedAt: collectedAt,
+                            retryCount: attemptIndex,
+                            sessionEventLineCount: parsed.sessionEventLineCount,
+                            analysisWindowStart: window.start,
+                            analysisWindowEnd: window.end,
+                            rawLogLineCount: parsed.rawLogLineCount,
+                            errorDescription: "pmset log command failed after matching session events were collected: \(error.localizedDescription)"
+                        )
+                    )
+                }
             }
         }
 
@@ -163,6 +186,8 @@ nonisolated private final class PMSetLogLineAccumulator: @unchecked Sendable {
     private let parser = PMSetLogParser()
     private let windowStart: Date?
     private let windowEnd: Date?
+    private let windowStartText: String?
+    private let windowEndText: String?
     private let includeRawExcerpt: Bool
     private let maxRawExcerptLines: Int
     private let maxManualTailLines: Int
@@ -181,11 +206,18 @@ nonisolated private final class PMSetLogLineAccumulator: @unchecked Sendable {
         maxManualTailLines: Int
     ) {
         if let sessionStart, let sessionEnd {
-            self.windowStart = sessionStart.addingTimeInterval(-paddingSeconds)
-            self.windowEnd = sessionEnd.addingTimeInterval(paddingSeconds)
+            let formatter = Self.makeTimestampFormatter()
+            let windowStart = sessionStart.addingTimeInterval(-paddingSeconds)
+            let windowEnd = sessionEnd.addingTimeInterval(paddingSeconds)
+            self.windowStart = windowStart
+            self.windowEnd = windowEnd
+            self.windowStartText = formatter.string(from: windowStart)
+            self.windowEndText = formatter.string(from: windowEnd)
         } else {
             self.windowStart = nil
             self.windowEnd = nil
+            self.windowStartText = nil
+            self.windowEndText = nil
         }
         self.includeRawExcerpt = includeRawExcerpt
         self.maxRawExcerptLines = max(maxRawExcerptLines, 0)
@@ -199,15 +231,20 @@ nonisolated private final class PMSetLogLineAccumulator: @unchecked Sendable {
         lock.lock()
         rawLogLineCount += 1
 
-        guard let windowStart, let windowEnd else {
+        guard let windowStartText, let windowEndText else {
             appendManualTail(line)
             lock.unlock()
             return
         }
 
-        let parsedEvents = parser.parseLine(line).filter {
-            $0.timestamp >= windowStart && $0.timestamp <= windowEnd
+        guard let timestampText = Self.timestampText(from: trimmed),
+              timestampText >= windowStartText,
+              timestampText <= windowEndText else {
+            lock.unlock()
+            return
         }
+
+        let parsedEvents = parser.parseLine(line)
         if !parsedEvents.isEmpty {
             events.append(contentsOf: parsedEvents)
             appendExcerptLine(line)
@@ -254,5 +291,21 @@ nonisolated private final class PMSetLogLineAccumulator: @unchecked Sendable {
         guard includeRawExcerpt, maxRawExcerptLines > 0, excerptLineSet.insert(line).inserted else { return }
         guard excerptLines.count < maxRawExcerptLines else { return }
         excerptLines.append(line)
+    }
+
+    private static func makeTimestampFormatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }
+
+    private static func timestampText(from line: String) -> String? {
+        guard line.count >= 19,
+              line[line.startIndex].isNumber else {
+            return nil
+        }
+        return String(line.prefix(19))
     }
 }

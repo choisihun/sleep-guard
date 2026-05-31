@@ -16,6 +16,7 @@ struct PMSetLogParserTests {
         #expect(events.contains { $0.category == .assertion && $0.processName == "powerd" && $0.assertionType == "InternalPreventSleep" })
         #expect(events.contains { $0.category == .assertion && $0.batteryCharge == 72 })
         #expect(events.contains { $0.category == .bluetooth })
+        #expect(events.contains { $0.category == .usbC })
         #expect(events.contains { $0.category == .sleepService })
     }
 
@@ -57,6 +58,7 @@ struct PMSetLogParserTests {
     2026-05-22 23:16:44 +0900 Assertions            Summary- [System: PrevIdle DeclUser PushSrvc SRPrevSleep kCPU kDisp] Using Batt(Charge: 72)
     2026-05-22 23:16:45 +0900 Assertions            PID 445(powerd) Created InternalPreventSleep "PM configd - Wait for Device enumeration" 00:00:00 id:0x0xd00009be9
     2026-05-22 23:17:00 +0900 bluetoothd            bluetooth sleep is slow
+    2026-05-22 23:17:20 +0900 kernel                Port-USB-C driver is slow to respond
     2026-05-22 23:18:00 +0900 SleepService          com.apple.sleepservices.sessionStarted
     """
 }

@@ -8,6 +8,7 @@ final class SettingsViewModelTests: XCTestCase {
 
         XCTAssertTrue(settings.autoCleanOnWillSleep)
         XCTAssertFalse(settings.shouldAutoQuitHighImpactAppsBeforeSleep)
+        XCTAssertFalse(settings.shouldApplyBatterySleepOptimization)
     }
 
     func testSaveRollsBackWhenLoginItemSyncFails() async {

@@ -18,21 +18,34 @@ final class PMSetCommandRunnerTests: XCTestCase {
     }
 
     @MainActor
-    func testPMSetRunnerStreamsLogForBoundedDateRange() async throws {
+    func testPMSetRunnerLetsCollectorFilterBoundedDateRange() async throws {
         let mock = MockCommandRunner()
         let runner = PMSetCommandRunner(runner: mock)
         let start = try XCTUnwrap(Self.date("2026-05-27 03:00:00 +0900"))
         let end = try XCTUnwrap(Self.date("2026-05-27 12:30:00 +0900"))
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
 
         try await runner.streamLog(from: start, to: end) { _ in }
 
+        XCTAssertEqual(mock.commands.last?.1, ["-g", "log"])
+    }
+
+    @MainActor
+    func testBatterySleepOptimizationDisablesWakeSettingsOnBatteryProfile() async {
+        let mock = MockCommandRunner()
+        let runner = PMSetCommandRunner(runner: mock)
+
+        let result = await runner.applyBatterySleepOptimization()
+
+        XCTAssertTrue(result.isFullyApplied)
         XCTAssertEqual(
-            mock.commands.last?.1,
-            ["-g", "log", "-start", formatter.string(from: start), "-end", formatter.string(from: end)]
+            mock.commands.map(\.1),
+            [
+                ["-b", "tcpkeepalive", "0"],
+                ["-b", "powernap", "0"],
+                ["-b", "womp", "0"],
+                ["-b", "networkoversleep", "0"],
+                ["-b", "proximitywake", "0"]
+            ]
         )
     }
 

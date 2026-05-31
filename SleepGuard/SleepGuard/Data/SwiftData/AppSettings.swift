@@ -15,6 +15,7 @@ final class AppSettings {
     var restoreAppsOnWake: Bool
     var includePMSetRawExcerpt: Bool
     var showDockIcon: Bool
+    var batterySleepOptimizationEnabled: Bool?
     var createdAt: Date
     var updatedAt: Date
 
@@ -31,6 +32,7 @@ final class AppSettings {
         restoreAppsOnWake: Bool = true,
         includePMSetRawExcerpt: Bool = true,
         showDockIcon: Bool = false,
+        batterySleepOptimizationEnabled: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -46,6 +48,7 @@ final class AppSettings {
         self.restoreAppsOnWake = restoreAppsOnWake
         self.includePMSetRawExcerpt = includePMSetRawExcerpt
         self.showDockIcon = showDockIcon
+        self.batterySleepOptimizationEnabled = batterySleepOptimizationEnabled
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -68,5 +71,10 @@ extension AppSettings {
     var hasShownLaunchAtLoginPrompt: Bool {
         get { didShowLaunchAtLoginPrompt ?? false }
         set { didShowLaunchAtLoginPrompt = newValue }
+    }
+
+    var shouldApplyBatterySleepOptimization: Bool {
+        get { batterySleepOptimizationEnabled ?? false }
+        set { batterySleepOptimizationEnabled = newValue }
     }
 }

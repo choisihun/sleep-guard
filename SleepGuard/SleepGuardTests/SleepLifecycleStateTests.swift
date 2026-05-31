@@ -38,6 +38,29 @@ final class SleepLifecycleStateTests: XCTestCase {
         XCTAssertEqual(environment.controller.lifecycleState, .sleeping)
     }
 
+    func testManualCleanAndSleepAppliesBatterySleepOptimizationWhenEnabled() async {
+        let environment = LifecycleTestEnvironment(
+            settings: AppSettings(autoCleanOnWillSleep: true, batterySleepOptimizationEnabled: true)
+        )
+
+        await environment.controller.cleanAndSleep()
+
+        XCTAssertEqual(environment.pmsetRunner.batterySleepOptimizationCallCount, 1)
+        XCTAssertTrue(environment.controller.lastActionMessage.contains("배터리 수면 최적화"))
+    }
+
+    func testWillSleepAppliesBatterySleepOptimizationWhenAutoCleanIsDisabled() async {
+        let environment = LifecycleTestEnvironment(
+            settings: AppSettings(autoCleanOnWillSleep: false, batterySleepOptimizationEnabled: true)
+        )
+
+        await environment.controller.handlePowerEvent(.willSleep)
+
+        XCTAssertEqual(environment.pmsetRunner.batterySleepOptimizationCallCount, 1)
+        XCTAssertEqual(environment.terminator.terminatedApps.count, 0)
+        XCTAssertTrue(environment.controller.lastActionMessage.contains("배터리 수면 최적화"))
+    }
+
     func testAutoHighImpactAppsAreTerminatedWhenSettingEnabled() async {
         let renderer = RunningAppInfo(
             bundleId: "com.example.Renderer",
@@ -345,8 +368,13 @@ private final class LifecycleAppRestorer: AppRestoring {
 private final class LifecyclePMSetRunner: PMSetCommandRunning {
     private(set) var assertionsCallCount = 0
     private(set) var sleepNowCallCount = 0
+    private(set) var batterySleepOptimizationCallCount = 0
     var assertionsOutput = ""
     var onAssertionsStarted: (() async -> Void)?
+    var batterySleepOptimizationResult = PMSetBatterySleepOptimizationResult(
+        appliedSettings: ["tcpkeepalive", "powernap", "womp", "networkoversleep", "proximitywake"],
+        failures: []
+    )
 
     func assertions() async throws -> String {
         assertionsCallCount += 1
@@ -360,6 +388,11 @@ private final class LifecyclePMSetRunner: PMSetCommandRunning {
 
     func sched() async throws -> String {
         ""
+    }
+
+    func applyBatterySleepOptimization() async -> PMSetBatterySleepOptimizationResult {
+        batterySleepOptimizationCallCount += 1
+        return batterySleepOptimizationResult
     }
 
     func sleepNow() async throws {

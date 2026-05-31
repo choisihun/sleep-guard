@@ -36,4 +36,22 @@ struct SleepRiskAnalyzerTests {
 
         #expect(result.level == .good)
     }
+
+    @Test func treatsLargeLongSleepDrainAsCautionEvenWithLowHourlyAverage() {
+        let result = SleepRiskAnalyzer().analyze(
+            SleepRiskInput(
+                drainPercent: 16,
+                drainPerHour: 0.63,
+                darkWakeCount: 0,
+                wakeRequestCount: 0,
+                assertionCount: 0,
+                bluetoothDelayCount: 0,
+                tcpKeepAliveCount: 0,
+                suspiciousProcessNames: []
+            )
+        )
+
+        #expect(result.level == .caution)
+        #expect(result.score >= 35)
+    }
 }

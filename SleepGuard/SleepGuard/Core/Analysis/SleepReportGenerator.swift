@@ -35,12 +35,14 @@ struct SleepReportGenerator {
         let wakeRequestEvents = canAnalyzeEvents ? events.filter { $0.category == .wakeRequest } : []
         let wakeRequestCount = canAnalyzeEvents ? Set(wakeRequestEvents.map(\.rawLine)).count : 0
         let assertionEvents = canAnalyzeEvents ? events.filter { $0.category == .assertion } : []
+        let usbCEvents = canAnalyzeEvents ? events.filter(isUSBCEvent) : []
         let bluetoothDelayCount = canAnalyzeEvents ? events.filter {
             $0.category == .bluetooth ||
                 $0.rawLine.localizedCaseInsensitiveContains("bluetooth sleep is slow") ||
                 $0.rawLine.localizedCaseInsensitiveContains("bluetooth.sleep is slow")
         }.count : 0
         let tcpKeepAliveCount = canAnalyzeEvents ? events.filter(\.isTCPKeepAliveActive).count : 0
+        let usbCWakeCount = canAnalyzeEvents ? Set(usbCEvents.map(\.rawLine)).count : 0
 
         let wakeProcesses = rankedNames(wakeRequestEvents.compactMap(\.processName))
         let assertionProcesses = rankedNames(assertionEvents.compactMap(\.processName))
@@ -56,15 +58,18 @@ struct SleepReportGenerator {
                 assertionCount: assertionEvents.count,
                 bluetoothDelayCount: bluetoothDelayCount,
                 tcpKeepAliveCount: tcpKeepAliveCount,
+                usbCWakeCount: usbCWakeCount,
                 suspiciousProcessNames: topSuspects
             )
         )
 
         var recommendations = recommendationEngine.recommendations(
+            drainPercent: session.drainPercent,
             drainPerHour: session.drainPerHour,
             darkWakeCount: darkWakeCount,
             tcpKeepAliveCount: tcpKeepAliveCount,
             bluetoothDelayCount: bluetoothDelayCount,
+            usbCWakeCount: usbCWakeCount,
             assertionProcesses: assertionProcesses,
             runningProcessNames: runningNames
         )
@@ -80,6 +85,8 @@ struct SleepReportGenerator {
                 session: session,
                 darkWakeCount: darkWakeCount,
                 wakeRequestCount: wakeRequestCount,
+                usbCWakeCount: usbCWakeCount,
+                usbCEvents: usbCEvents,
                 terminatedCount: terminatedApps.count,
                 restoredCount: restoredApps.count,
                 topSuspects: topSuspects,
@@ -103,6 +110,8 @@ struct SleepReportGenerator {
         session: SleepSession,
         darkWakeCount: Int,
         wakeRequestCount: Int,
+        usbCWakeCount: Int,
+        usbCEvents: [PMSetEvent],
         terminatedCount: Int,
         restoredCount: Int,
         topSuspects: [String],
@@ -110,9 +119,20 @@ struct SleepReportGenerator {
     ) -> String {
         let before = session.batteryBefore
         let after = session.batteryAfter ?? before
-        var parts = ["배터리는 \(before)%에서 \(after)%로 \(session.drainPercent)% 감소했습니다."]
+        var parts = [
+            "\(durationText(session.durationSeconds)) 동안 배터리는 \(before)%에서 \(after)%로 \(session.drainPercent)% 감소했습니다."
+        ]
+        if let drainContext = drainContext(session) {
+            parts.append(drainContext)
+        }
         if darkWakeCount > 0 || wakeRequestCount > 0 {
             parts.append("잠자기 중 DarkWake \(darkWakeCount)회, Wake Request \(wakeRequestCount)회가 감지되었습니다.")
+        }
+        if usbCWakeCount > 0 {
+            parts.append("USB-C/외부 장치 wake 신호 \(usbCWakeCount)회가 감지되었습니다.")
+            if let usbCDrainContext = usbCDrainContext(session: session, usbCEvents: usbCEvents) {
+                parts.append(usbCDrainContext)
+            }
         }
         if !topSuspects.isEmpty {
             parts.append("의심 항목은 \(topSuspects.prefix(3).joined(separator: ", "))입니다.")
@@ -123,10 +143,51 @@ struct SleepReportGenerator {
         if eventAnalysisStatus.isUnavailable {
             parts.append(eventAnalysisStatus.unavailableSummaryText)
         }
-        if risk == .good {
+        if risk == .good && !eventAnalysisStatus.isUnavailable {
             parts.append("현재 수면 상태는 안정적으로 보입니다.")
         }
         return parts.joined(separator: " ")
+    }
+
+    private func drainContext(_ session: SleepSession) -> String? {
+        if session.drainPercent >= BatteryDrainThresholds.highTotalDrainPercent {
+            if session.drainPerHour <= BatteryDrainThresholds.highDrainPerHour {
+                return "시간당 평균은 \(String(format: "%.2f", session.drainPerHour))%/h로 급격하지 않지만, 총 감소량이 커 장시간 누적 방전으로 봐야 합니다."
+            }
+            return "총 감소량과 시간당 소모가 모두 높은 편입니다."
+        }
+        if session.drainPercent >= BatteryDrainThresholds.notableTotalDrainPercent {
+            return "총 감소량이 평소보다 큰 편입니다."
+        }
+        if session.drainPerHour > BatteryDrainThresholds.highDrainPerHour {
+            return "시간당 평균 소모가 \(String(format: "%.2f", session.drainPerHour))%/h로 높은 편입니다."
+        }
+        return nil
+    }
+
+    private func usbCDrainContext(session: SleepSession, usbCEvents: [PMSetEvent]) -> String? {
+        guard let batteryAfter = session.batteryAfter,
+              let firstCharge = usbCEvents
+                .sorted(by: { $0.timestamp < $1.timestamp })
+                .compactMap(\.batteryCharge)
+                .first else {
+            return nil
+        }
+
+        let drainAfterUSB = max(0, firstCharge - batteryAfter)
+        guard drainAfterUSB > 0 else { return nil }
+
+        if session.drainPercent > 0 {
+            let share = Int((Double(drainAfterUSB) / Double(session.drainPercent) * 100).rounded())
+            return "USB-C 최초 감지 이후 \(drainAfterUSB)%가 더 줄어 전체 감소량의 약 \(share)%와 겹칩니다."
+        }
+        return "USB-C 최초 감지 이후 \(drainAfterUSB)%가 더 줄었습니다."
+    }
+
+    private func durationText(_ seconds: TimeInterval) -> String {
+        let minutes = max(0, Int((seconds / 60).rounded()))
+        if minutes < 60 { return "\(minutes)분" }
+        return "\(minutes / 60)시간 \(minutes % 60)분"
     }
 
     private func rankedNames(_ names: [String]) -> [String] {
@@ -143,6 +204,23 @@ struct SleepReportGenerator {
         return sorted.map(\.name)
     }
 
+    private func isUSBCEvent(_ event: PMSetEvent) -> Bool {
+        if event.category == .usbC {
+            return true
+        }
+        if containsUSBCSignal(event.rawLine) {
+            return true
+        }
+        return event.wakeReason.map(containsUSBCSignal) ?? false
+    }
+
+    private func containsUSBCSignal(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return lower.contains("usb-c")
+            || lower.contains("usb_c")
+            || lower.contains("usbc")
+            || lower.contains("port-usb")
+    }
 }
 
 private extension Array where Element: Hashable {

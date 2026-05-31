@@ -68,6 +68,7 @@ private struct SettingsSnapshot {
     var restoreAppsOnWake: Bool
     var includePMSetRawExcerpt: Bool
     var showDockIcon: Bool
+    var batterySleepOptimizationEnabled: Bool
 
     init(_ settings: AppSettings) {
         launchAtLogin = settings.launchAtLogin
@@ -81,6 +82,7 @@ private struct SettingsSnapshot {
         restoreAppsOnWake = settings.restoreAppsOnWake
         includePMSetRawExcerpt = settings.includePMSetRawExcerpt
         showDockIcon = settings.showDockIcon
+        batterySleepOptimizationEnabled = settings.shouldApplyBatterySleepOptimization
     }
 
     func apply(to settings: AppSettings) {
@@ -95,5 +97,6 @@ private struct SettingsSnapshot {
         settings.restoreAppsOnWake = restoreAppsOnWake
         settings.includePMSetRawExcerpt = includePMSetRawExcerpt
         settings.showDockIcon = showDockIcon
+        settings.shouldApplyBatterySleepOptimization = batterySleepOptimizationEnabled
     }
 }
