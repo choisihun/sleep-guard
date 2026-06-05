@@ -112,6 +112,8 @@ Stored data is limited to sleep session timing, battery values, report summaries
 
 Contributions should preserve the safety model above. Changes touching PMSet parsing, command output handling, sleep lifecycle state, app termination/restore policy, persistence, settings side effects, or report generation should include focused tests.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development expectations and [SECURITY.md](SECURITY.md) for vulnerability reporting.
+
 ## License
 
 Sleep Guard is released under the MIT License. See [LICENSE](LICENSE).

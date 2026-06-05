@@ -5,6 +5,11 @@
 ## User settings
 xcuserdata/
 .DS_Store
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
 
 ## Obj-C/Swift specific
 *.hmap
