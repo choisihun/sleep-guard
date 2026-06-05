@@ -1,0 +1,20 @@
+[Unit]
+Description=Sleep Guard TestFlight webhook
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/sleepguard-webhook
+EnvironmentFile=/opt/sleepguard-webhook/.env
+ExecStart=/usr/bin/node /opt/sleepguard-webhook/server.js
+Restart=always
+RestartSec=5
+User=sleepguard
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
