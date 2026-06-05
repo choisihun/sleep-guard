@@ -693,7 +693,7 @@ private extension SleepGuardController {
 
         let failedSettings = result.failures.map(\.setting).joined(separator: ", ")
         if result.hasPermissionFailure {
-            return "배터리 수면 최적화 실패: 관리자 권한이 필요합니다. 실패 항목: \(failedSettings)"
+            return "배터리 수면 최적화 실패: 관리자 권한이 필요합니다. 터미널에서 sudo pmset -b tcpkeepalive 0 powernap 0 womp 0 networkoversleep 0 proximitywake 0 실행이 필요합니다. 실패 항목: \(failedSettings)"
         }
         if !result.appliedSettings.isEmpty {
             return "배터리 수면 최적화를 일부만 적용했습니다. 실패 항목: \(failedSettings)"

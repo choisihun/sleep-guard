@@ -8,9 +8,16 @@ struct BatteryDrainResult: Equatable {
 
 enum BatteryDrainThresholds {
     static let notableTotalDrainPercent = 10
+    static let longSleepNotableTotalDrainPercent = 8
+    static let longSleepMinimumHours = 8.0
     static let highTotalDrainPercent = 15
     static let highDrainPerHour = 1.5
     static let severeDrainPerHour = 3.0
+
+    static func isLongSleepNotableDrain(drainPercent: Int, durationSeconds: TimeInterval) -> Bool {
+        drainPercent >= longSleepNotableTotalDrainPercent &&
+            durationSeconds >= longSleepMinimumHours * 3600
+    }
 }
 
 struct BatteryDrainCalculator {

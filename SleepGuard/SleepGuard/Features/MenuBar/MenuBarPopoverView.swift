@@ -75,7 +75,7 @@ struct MenuBarPopoverView: View {
                 Button {
                     viewModel.openMainWindow()
                 } label: {
-                    Label("Open Sleep Guard", systemImage: "macwindow")
+                    Label("Sleep Guard 열기", systemImage: "macwindow")
                         .frame(maxWidth: .infinity)
                 }
                 .controlSize(.large)

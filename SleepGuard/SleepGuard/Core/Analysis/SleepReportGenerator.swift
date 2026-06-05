@@ -35,6 +35,7 @@ struct SleepReportGenerator {
         let wakeRequestEvents = canAnalyzeEvents ? events.filter { $0.category == .wakeRequest } : []
         let wakeRequestCount = canAnalyzeEvents ? Set(wakeRequestEvents.map(\.rawLine)).count : 0
         let assertionEvents = canAnalyzeEvents ? events.filter { $0.category == .assertion } : []
+        let blockingAssertionEvents = sleepBlockingAssertionEvents(assertionEvents)
         let usbCEvents = canAnalyzeEvents ? events.filter(isUSBCEvent) : []
         let bluetoothDelayCount = canAnalyzeEvents ? events.filter {
             $0.category == .bluetooth ||
@@ -45,7 +46,7 @@ struct SleepReportGenerator {
         let usbCWakeCount = canAnalyzeEvents ? Set(usbCEvents.map(\.rawLine)).count : 0
 
         let wakeProcesses = rankedNames(wakeRequestEvents.compactMap(\.processName))
-        let assertionProcesses = rankedNames(assertionEvents.compactMap(\.processName))
+        let assertionProcesses = rankedNames(blockingAssertionEvents.compactMap(\.processName))
         let runningNames = runningApps.map(\.displayName)
         let topSuspects = (wakeProcesses + assertionProcesses).uniqued()
 
@@ -53,9 +54,10 @@ struct SleepReportGenerator {
             SleepRiskInput(
                 drainPercent: session.drainPercent,
                 drainPerHour: session.drainPerHour,
+                durationSeconds: session.durationSeconds,
                 darkWakeCount: darkWakeCount,
                 wakeRequestCount: wakeRequestCount,
-                assertionCount: assertionEvents.count,
+                assertionCount: blockingAssertionEvents.count,
                 bluetoothDelayCount: bluetoothDelayCount,
                 tcpKeepAliveCount: tcpKeepAliveCount,
                 usbCWakeCount: usbCWakeCount,
@@ -66,6 +68,7 @@ struct SleepReportGenerator {
         var recommendations = recommendationEngine.recommendations(
             drainPercent: session.drainPercent,
             drainPerHour: session.drainPerHour,
+            durationSeconds: session.durationSeconds,
             darkWakeCount: darkWakeCount,
             tcpKeepAliveCount: tcpKeepAliveCount,
             bluetoothDelayCount: bluetoothDelayCount,
@@ -85,6 +88,8 @@ struct SleepReportGenerator {
                 session: session,
                 darkWakeCount: darkWakeCount,
                 wakeRequestCount: wakeRequestCount,
+                tcpKeepAliveCount: tcpKeepAliveCount,
+                bluetoothDelayCount: bluetoothDelayCount,
                 usbCWakeCount: usbCWakeCount,
                 usbCEvents: usbCEvents,
                 terminatedCount: terminatedApps.count,
@@ -95,7 +100,7 @@ struct SleepReportGenerator {
             recommendations: recommendations,
             darkWakeCount: darkWakeCount,
             wakeRequestCount: wakeRequestCount,
-            assertionCount: assertionEvents.count,
+            assertionCount: blockingAssertionEvents.count,
             bluetoothDelayCount: bluetoothDelayCount,
             tcpKeepAliveCount: tcpKeepAliveCount,
             rawPMSetExcerpt: rawPMSetExcerpt,
@@ -110,6 +115,8 @@ struct SleepReportGenerator {
         session: SleepSession,
         darkWakeCount: Int,
         wakeRequestCount: Int,
+        tcpKeepAliveCount: Int,
+        bluetoothDelayCount: Int,
         usbCWakeCount: Int,
         usbCEvents: [PMSetEvent],
         terminatedCount: Int,
@@ -127,6 +134,15 @@ struct SleepReportGenerator {
         }
         if darkWakeCount > 0 || wakeRequestCount > 0 {
             parts.append("잠자기 중 DarkWake \(darkWakeCount)회, Wake Request \(wakeRequestCount)회가 감지되었습니다.")
+        }
+        if let dominantCause = dominantDrainCauseText(
+            wakeRequestCount: wakeRequestCount,
+            tcpKeepAliveCount: tcpKeepAliveCount,
+            bluetoothDelayCount: bluetoothDelayCount,
+            usbCWakeCount: usbCWakeCount,
+            topSuspects: topSuspects
+        ) {
+            parts.append(dominantCause)
         }
         if usbCWakeCount > 0 {
             parts.append("USB-C/외부 장치 wake 신호 \(usbCWakeCount)회가 감지되었습니다.")
@@ -156,11 +172,43 @@ struct SleepReportGenerator {
             }
             return "총 감소량과 시간당 소모가 모두 높은 편입니다."
         }
+        if BatteryDrainThresholds.isLongSleepNotableDrain(
+            drainPercent: session.drainPercent,
+            durationSeconds: session.durationSeconds
+        ) {
+            return "장시간 수면 기준으로 총 감소량이 큰 편입니다."
+        }
         if session.drainPercent >= BatteryDrainThresholds.notableTotalDrainPercent {
             return "총 감소량이 평소보다 큰 편입니다."
         }
         if session.drainPerHour > BatteryDrainThresholds.highDrainPerHour {
             return "시간당 평균 소모가 \(String(format: "%.2f", session.drainPerHour))%/h로 높은 편입니다."
+        }
+        return nil
+    }
+
+    private func dominantDrainCauseText(
+        wakeRequestCount: Int,
+        tcpKeepAliveCount: Int,
+        bluetoothDelayCount: Int,
+        usbCWakeCount: Int,
+        topSuspects: [String]
+    ) -> String? {
+        if tcpKeepAliveCount > 0, wakeRequestCount > 20 {
+            let names = topSuspects.prefix(3).joined(separator: ", ")
+            let usbCContext = usbCWakeCount > 20
+                ? " USB-C 신호는 반복 wake 때 같이 잡힌 지연 신호일 가능성이 큽니다."
+                : ""
+            if names.isEmpty {
+                return "가장 큰 반복 원인은 네트워크 유지/TCP KeepAlive 기반 예약 wake로 보입니다.\(usbCContext)"
+            }
+            return "가장 큰 반복 원인은 네트워크 유지/TCP KeepAlive 기반 예약 wake입니다. 반복 요청자는 \(names)입니다.\(usbCContext)"
+        }
+        if bluetoothDelayCount > 20 {
+            return "가장 큰 반복 원인은 Bluetooth sleep 지연으로 보입니다."
+        }
+        if usbCWakeCount > 20 {
+            return "가장 큰 반복 원인은 USB-C/외부 장치 wake 지연으로 보입니다."
         }
         return nil
     }
@@ -204,6 +252,20 @@ struct SleepReportGenerator {
         return sorted.map(\.name)
     }
 
+    private func sleepBlockingAssertionEvents(_ events: [PMSetEvent]) -> [PMSetEvent] {
+        events.filter { event in
+            guard let assertionType = event.assertionType?.lowercased() else { return false }
+            let lower = event.rawLine.lowercased()
+            guard sleepBlockingAssertionTypes.contains(assertionType) else { return false }
+            guard !lower.contains(" released ") else { return false }
+            guard !lower.contains(" timedout ") else { return false }
+            guard !lower.contains(" turnedoff ") else { return false }
+            guard !lower.contains(" summary ") && !lower.contains("summary-") else { return false }
+            guard !lower.contains("darkwake") else { return false }
+            return true
+        }
+    }
+
     private func isUSBCEvent(_ event: PMSetEvent) -> Bool {
         if event.category == .usbC {
             return true
@@ -222,6 +284,14 @@ struct SleepReportGenerator {
             || lower.contains("port-usb")
     }
 }
+
+private let sleepBlockingAssertionTypes = Set([
+    "preventuseridlesystemsleep",
+    "preventsystemsleep",
+    "internalpreventsleep",
+    "noidlesleepassertion",
+    "networkclientactive"
+])
 
 private extension Array where Element: Hashable {
     func uniqued() -> [Element] {

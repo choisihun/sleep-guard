@@ -36,4 +36,20 @@ struct RecommendationEngineTests {
 
         #expect(recommendations.contains { $0.contains("총 배터리 감소량") })
     }
+
+    @Test func recommendsBatterySleepOptimizationForLongSleepDrain() {
+        let recommendations = RecommendationEngine().recommendations(
+            drainPercent: 9,
+            drainPerHour: 0.71,
+            durationSeconds: 12.6 * 3600,
+            darkWakeCount: 0,
+            tcpKeepAliveCount: 1,
+            bluetoothDelayCount: 0,
+            assertionProcesses: [],
+            runningProcessNames: []
+        )
+
+        #expect(recommendations.contains { $0.contains("장시간 수면") })
+        #expect(recommendations.contains { $0.contains("배터리 수면 최적화") })
+    }
 }

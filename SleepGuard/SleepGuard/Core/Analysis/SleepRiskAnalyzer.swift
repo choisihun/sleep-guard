@@ -3,6 +3,7 @@ import Foundation
 struct SleepRiskInput {
     var drainPercent: Int
     var drainPerHour: Double
+    var durationSeconds: TimeInterval = 0
     var darkWakeCount: Int
     var wakeRequestCount: Int
     var assertionCount: Int
@@ -20,9 +21,15 @@ struct SleepRiskResult: Equatable {
 struct SleepRiskAnalyzer {
     func analyze(_ input: SleepRiskInput) -> SleepRiskResult {
         var score = 0
-        score += min(input.drainPercent * 4, 30)
+        let isLongSleepNotableDrain = BatteryDrainThresholds.isLongSleepNotableDrain(
+            drainPercent: input.drainPercent,
+            durationSeconds: input.durationSeconds
+        )
+        score += min(input.drainPercent * 2, 30)
         if input.drainPercent >= BatteryDrainThresholds.highTotalDrainPercent {
             score += 15
+        } else if isLongSleepNotableDrain {
+            score += 17
         } else if input.drainPercent >= BatteryDrainThresholds.notableTotalDrainPercent {
             score += 8
         }
@@ -36,6 +43,9 @@ struct SleepRiskAnalyzer {
         score += min(input.usbCWakeCount * 2, 10)
 
         score += min(input.suspiciousProcessNames.count * 3, 15)
+        if input.drainPercent == 0 && input.drainPerHour == 0 {
+            score = min(score, 60)
+        }
 
         let bounded = max(0, min(100, score))
         let level: SleepRiskLevel

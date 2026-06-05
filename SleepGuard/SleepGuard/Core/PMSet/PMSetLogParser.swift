@@ -86,19 +86,22 @@ nonisolated struct PMSetLogParser {
             category = category == .other ? .tcpKeepAlive : category
         }
 
-        var events = [
-            PMSetEvent(
-                timestamp: timestamp,
-                category: category,
-                message: line,
-                processName: assertion.processName,
-                assertionType: assertion.assertionType,
-                wakeReason: wakeReason,
-                batteryCharge: batteryCharge,
-                isTCPKeepAliveActive: tcpActive,
-                rawLine: line
+        var events: [PMSetEvent] = []
+        if category != .wakeRequest || wakeRequests.isEmpty {
+            events.append(
+                PMSetEvent(
+                    timestamp: timestamp,
+                    category: category,
+                    message: line,
+                    processName: assertion.processName,
+                    assertionType: assertion.assertionType,
+                    wakeReason: wakeReason,
+                    batteryCharge: batteryCharge,
+                    isTCPKeepAliveActive: tcpActive,
+                    rawLine: line
+                )
             )
-        ]
+        }
 
         for request in wakeRequests {
             events.append(

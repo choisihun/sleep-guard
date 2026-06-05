@@ -18,7 +18,7 @@ final class PMSetCommandRunnerTests: XCTestCase {
     }
 
     @MainActor
-    func testPMSetRunnerLetsCollectorFilterBoundedDateRange() async throws {
+    func testPMSetRunnerUsesBoundedShellFilterWhenDateRangeIsAvailable() async throws {
         let mock = MockCommandRunner()
         let runner = PMSetCommandRunner(runner: mock)
         let start = try XCTUnwrap(Self.date("2026-05-27 03:00:00 +0900"))
@@ -26,6 +26,25 @@ final class PMSetCommandRunnerTests: XCTestCase {
 
         try await runner.streamLog(from: start, to: end) { _ in }
 
+        let command = try XCTUnwrap(mock.commands.last)
+        XCTAssertEqual(command.0.path, "/bin/sh")
+        XCTAssertEqual(command.1.first, "-c")
+        let script = try XCTUnwrap(command.1.last)
+        XCTAssertTrue(script.contains("/usr/bin/pmset -g log"))
+        XCTAssertTrue(script.contains("/usr/bin/awk"))
+        XCTAssertTrue(script.contains("2026-05-27 03:00:00"))
+        XCTAssertTrue(script.contains("2026-05-27 12:30:00"))
+        XCTAssertTrue(script.contains("timestamp > end"))
+    }
+
+    @MainActor
+    func testPMSetRunnerUsesRawLogWhenDateRangeIsUnavailable() async throws {
+        let mock = MockCommandRunner()
+        let runner = PMSetCommandRunner(runner: mock)
+
+        try await runner.streamLog(from: nil, to: nil) { _ in }
+
+        XCTAssertEqual(mock.commands.last?.0.path, "/usr/bin/pmset")
         XCTAssertEqual(mock.commands.last?.1, ["-g", "log"])
     }
 

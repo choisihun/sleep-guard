@@ -12,6 +12,8 @@ struct PMSetLogParserTests {
         #expect(events.contains { $0.category == .wakeRequest && $0.processName == "dasd" })
         #expect(events.contains { $0.category == .wakeRequest && $0.processName == "dasd" && $0.wakeReason == "SleepService" })
         #expect(events.contains { $0.category == .wakeRequest && $0.message.contains("Wake Requests") })
+        #expect(events.filter { $0.category == .wakeRequest }.count == 2)
+        #expect(!events.contains { $0.category == .wakeRequest && $0.processName == nil })
         #expect(events.contains { $0.category == .assertion && $0.processName == "coreaudiod" && $0.assertionType == "PreventUserIdleSystemSleep" })
         #expect(events.contains { $0.category == .assertion && $0.processName == "powerd" && $0.assertionType == "InternalPreventSleep" })
         #expect(events.contains { $0.category == .assertion && $0.batteryCharge == 72 })

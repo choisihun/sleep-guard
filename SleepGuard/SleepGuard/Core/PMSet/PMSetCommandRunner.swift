@@ -55,6 +55,7 @@ extension PMSetCommandRunning {
 nonisolated struct PMSetCommandRunner: PMSetCommandRunning {
     private let runner: CommandRunning
     private let executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+    private let shellURL = URL(fileURLWithPath: "/bin/sh")
 
     init(runner: CommandRunning = SystemCommandRunner(timeoutSeconds: 60)) {
         self.runner = runner
@@ -73,17 +74,27 @@ nonisolated struct PMSetCommandRunner: PMSetCommandRunning {
     }
 
     func streamLog(from start: Date?, to end: Date?, _ lineHandler: @escaping @Sendable (String) -> Void) async throws {
-        guard start != nil, end != nil else {
+        guard let start, let end else {
             try await streamLog(lineHandler)
             return
         }
 
-        // pmset -g log does not reliably honor date range flags on supported macOS versions.
-        // Keep streaming bounded by the command timeout and let PMSetLogCollector filter lines by timestamp.
-        try await streamLog(lineHandler)
+        try await streamLog(
+            executableURL: shellURL,
+            arguments: ["-c", boundedLogScript(start: start, end: end)],
+            lineHandler
+        )
     }
 
     private func streamLog(arguments: [String], _ lineHandler: @escaping @Sendable (String) -> Void) async throws {
+        try await streamLog(executableURL: executableURL, arguments: arguments, lineHandler)
+    }
+
+    private func streamLog(
+        executableURL: URL,
+        arguments: [String],
+        _ lineHandler: @escaping @Sendable (String) -> Void
+    ) async throws {
         let splitter = CommandLineSplitter(lineHandler: lineHandler)
         _ = try await runner.run(
             executableURL: executableURL,
@@ -94,6 +105,30 @@ nonisolated struct PMSetCommandRunner: PMSetCommandRunning {
             }
         )
         splitter.finish()
+    }
+
+    private func boundedLogScript(start: Date, end: Date) -> String {
+        let startText = logTimestampText(start)
+        let endText = logTimestampText(end)
+        return """
+        /usr/bin/pmset -g log | /usr/bin/awk -v start="\(startText)" -v end="\(endText)" '
+        /^[0-9][0-9][0-9][0-9]-/ {
+            timestamp = substr($0, 1, 19)
+            if (timestamp >= start && timestamp <= end) {
+                print
+            } else if (timestamp > end) {
+                exit
+            }
+        }'
+        """
+    }
+
+    private func logTimestampText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: date)
     }
 
     func sched() async throws -> String {
